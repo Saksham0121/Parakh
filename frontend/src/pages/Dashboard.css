@@ -1,0 +1,118 @@
+.dashboard-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 280px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.border-b { border-bottom: 1px solid var(--border); }
+.border-t { border-top: 1px solid var(--border); }
+
+.logo {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.text-accent { color: var(--accent); }
+
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-input-wrapper input {
+  width: 100%;
+  padding-left: 2rem;
+  background: var(--bg-dark);
+}
+.search-icon {
+  position: absolute;
+  left: 0.5rem;
+  color: var(--text-muted);
+}
+
+.search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 0.25rem;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.search-container { position: relative; }
+
+.search-item {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+}
+.search-item:hover { background: var(--bg-hover); }
+
+.section-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.watchlist-item {
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.2s;
+}
+.watchlist-item:hover {
+  background: var(--bg-hover);
+}
+.watchlist-item.active {
+  background: var(--bg-hover);
+  border-left-color: var(--accent);
+}
+
+.price {
+  font-variant-numeric: tabular-nums;
+  transition: color 0.3s ease;
+}
+.price.flash {
+  animation: flash 1s;
+}
+@keyframes flash {
+  0% { color: var(--success); }
+  100% { color: var(--text-main); }
+}
+
+.icon-btn {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.25rem;
+}
+.icon-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text-main);
+}
+
+.main-content {
+  flex: 1;
+  background: var(--bg-dark);
+}
+
+.active-symbol-info h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.live-price {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--success);
+}
