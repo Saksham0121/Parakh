@@ -1,0 +1,26 @@
+{
+  "name": "parakh",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time trading analytics platform",
+  "workspaces": [
+    "common",
+    "user-service",
+    "market-data-service",
+    "indicator-service",
+    "setup-service",
+    "alert-service",
+    "backtest-service",
+    "fundamentals-service",
+    "notification-service",
+    "websocket-gateway",
+    "api-gateway",
+    "frontend"
+  ],
+  "scripts": {
+    "docker:up": "docker compose -f infra/docker-compose.yml up -d",
+    "docker:down": "docker compose -f infra/docker-compose.yml down",
+    "docker:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "docker:build": "docker compose -f infra/docker-compose.yml build"
+  }
+}
