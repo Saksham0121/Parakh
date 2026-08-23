@@ -127,6 +127,117 @@ services:
     depends_on:
       - redis
 
+  # ─── Services ─────────────────────────────────────────
+  api-gateway:
+    build:
+      context: ../api-gateway
+    container_name: parakh-api-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_HOST=redis
+      - JWT_SECRET=${JWT_SECRET:-parakh_secret}
+    depends_on:
+      - redis
+      - user-service
+
+  user-service:
+    build:
+      context: ../user-service
+    container_name: parakh-user-service
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
+      - JWT_SECRET=${JWT_SECRET:-parakh_secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  market-data-service:
+    build:
+      context: ../market-data-service
+    container_name: parakh-market-data
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  indicator-service:
+    build:
+      context: ../indicator-service
+    container_name: parakh-indicator
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  setup-service:
+    build:
+      context: ../setup-service
+    container_name: parakh-setup-service
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  alert-service:
+    build:
+      context: ../alert-service
+    container_name: parakh-alert-service
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  websocket-gateway:
+    build:
+      context: ../websocket-gateway
+    container_name: parakh-ws-gateway
+    restart: unless-stopped
+    ports:
+      - "3009:3009"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - JWT_SECRET=${JWT_SECRET:-parakh_secret}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+    container_name: parakh-frontend
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      - api-gateway
+
 volumes:
   postgres_data:
   timescale_data:
