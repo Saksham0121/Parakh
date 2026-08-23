@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  watchlists Watchlist[]
+  setups     Setup[]
+
+  @@map("users")
+}
+
+model Watchlist {
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+  symbol String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol])
+  @@map("watchlists")
+}
+
+model Setup {
+  id                    String   @id @default(uuid())
+  userId                String   @map("user_id")
+  name                  String
+  active                Boolean  @default(true)
+  technicalConditions   Json     @map("technical_conditions")
+  fundamentalConditions Json?    @map("fundamental_conditions")
+  fundamentalMode       String   @default("display_only") @map("fundamental_mode")
+  orderRule             Json?    @map("order_rule")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  setupMatches SetupMatch[]
+
+  @@map("setups")
+}
+
+model SetupMatch {
+  id                   String   @id @default(uuid())
+  setupId              String   @map("setup_id")
+  symbol               String
+  matchedAt            DateTime @map("matched_at")
+  technicalSnapshot    Json     @map("technical_snapshot")
+  fundamentalsSnapshot Json?    @map("fundamentals_snapshot")
+  fundamentalsPassed   Boolean  @map("fundamentals_passed")
+  alertFired           Boolean  @map("alert_fired")
+
+  setup Setup @relation(fields: [setupId], references: [id], onDelete: Cascade)
+
+  @@map("setup_matches")
+}
+
+model CompanyFundamentals {
+  id            String   @id @default(uuid())
+  symbol        String   @unique
+  peRatio       Float?   @map("pe_ratio")
+  eps           Float?
+  roe           Float?
+  debtToEquity  Float?   @map("debt_to_equity")
+  marketCap     Float?   @map("market_cap")
+  sector        String?
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("company_fundamentals")
+}
+
+model BacktestRun {
+  id             String    @id @default(uuid())
+  setupId        String    @map("setup_id")
+  symbol         String
+  dateRangeStart DateTime  @map("date_range_start")
+  dateRangeEnd   DateTime  @map("date_range_end")
+  status         String    @default("pending")
+  requestedAt    DateTime  @default(now()) @map("requested_at")
+  completedAt    DateTime? @map("completed_at")
+
+  trades  BacktestTrade[]
+  result  BacktestResult?
+
+  @@map("backtest_runs")
+}
+
+model BacktestTrade {
+  id            String   @id @default(uuid())
+  backtestRunId String   @map("backtest_run_id")
+  entryDate     DateTime @map("entry_date")
+  entryPrice    Float    @map("entry_price")
+  exitDate      DateTime @map("exit_date")
+  exitPrice     Float    @map("exit_price")
+  exitReason    String   @map("exit_reason")
+  returnPct     Float    @map("return_pct")
+  result        String
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  @@map("backtest_trades")
+}
+
+model BacktestResult {
+  id              String @id @default(uuid())
+  backtestRunId   String @unique @map("backtest_run_id")
+  totalTrades     Int    @map("total_trades")
+  wins            Int
+  losses          Int
+  winRate         Float  @map("win_rate")
+  avgReturnPct    Float  @map("avg_return_pct")
+  maxDrawdownPct  Float  @map("max_drawdown_pct")
+  bestTradePct    Float  @map("best_trade_pct")
+  worstTradePct   Float  @map("worst_trade_pct")
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  @@map("backtest_results")
+}
+
+model SetupRanking {
+  id                    String   @id @default(uuid())
+  setupId               String   @unique @map("setup_id")
+  totalBacktestRuns     Int      @map("total_backtest_runs")
+  aggregateWinRate      Float    @map("aggregate_win_rate")
+  aggregateAvgReturnPct Float    @map("aggregate_avg_return_pct")
+  rankScore             Float    @map("rank_score")
+  lastRankedAt          DateTime @map("last_ranked_at")
+
+  @@map("setup_rankings")
+}
