@@ -238,6 +238,39 @@ services:
     depends_on:
       - api-gateway
 
+  fundamentals-service:
+    build:
+      context: ../fundamentals-service
+    container_name: parakh-fundamentals-service
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
+      - REDIS_HOST=redis
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  backtest-service:
+    build:
+      context: ../backtest-service
+    container_name: parakh-backtest-service
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   timescale_data:

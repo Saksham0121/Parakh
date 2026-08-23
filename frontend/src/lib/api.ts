@@ -40,4 +40,12 @@ export const api = {
     fetchWithAuth(`/market/candles/${symbol}?resolution=${resolution}&from=${from}&to=${to}`),
   
   searchSymbol: (query: string) => fetchWithAuth(`/market/search?q=${query}`),
+
+  getSetups: () => fetchWithAuth('/setups'),
+  createSetup: (data: any) => fetchWithAuth('/setups', { method: 'POST', body: JSON.stringify(data) }),
+  deleteSetup: (id: string) => fetchWithAuth(`/setups/${id}`, { method: 'DELETE' }),
+
+  runBacktest: (data: any) => fetchWithAuth('/backtests', { method: 'POST', body: JSON.stringify(data) }),
+  getBacktestRun: (runId: string) => fetchWithAuth(`/backtests/${runId}`),
+  getLeaderboard: () => fetchWithAuth('/backtests/leaderboard/top'),
 };

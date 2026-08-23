@@ -33,9 +33,9 @@ const SERVICE_ROUTES: Record<string, { target: string; pathRewrite: Record<strin
     target: `http://localhost:${SERVICE_PORTS.ALERT_SERVICE}`,
     pathRewrite: { '^/api/alerts': '/alerts' },
   },
-  '/api/backtest': {
+  '/api/backtests': {
     target: `http://localhost:${SERVICE_PORTS.BACKTEST_SERVICE}`,
-    pathRewrite: { '^/api/backtest': '/backtest' },
+    pathRewrite: { '^/api/backtests': '/backtests' },
   },
   '/api/fundamentals': {
     target: `http://localhost:${SERVICE_PORTS.FUNDAMENTALS_SERVICE}`,

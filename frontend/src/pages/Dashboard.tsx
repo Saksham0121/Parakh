@@ -4,7 +4,10 @@ import { useAuthStore } from '../store/authStore';
 import { useSocketStore } from '../store/socketStore';
 import { api } from '../lib/api';
 import Chart from '../components/Chart';
-import { LogOut, Search, Activity } from 'lucide-react';
+import SetupBuilder from '../components/SetupBuilder';
+import BacktestDashboard from '../components/BacktestDashboard';
+import Leaderboard from '../components/Leaderboard';
+import { LogOut, Search, Activity, BarChart2, Settings, PlayCircle, Trophy } from 'lucide-react';
 import './Dashboard.css';
 
 export default function Dashboard() {
@@ -16,6 +19,7 @@ export default function Dashboard() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [watchlist, setWatchlist] = useState<any[]>([]);
   const [activeSymbol, setActiveSymbol] = useState('BINANCE:BTCUSDT');
+  const [activeTab, setActiveTab] = useState<'chart' | 'setup' | 'backtest' | 'leaderboard'>('chart');
 
   useEffect(() => {
     connect();
@@ -145,17 +149,26 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="main-content flex flex-col">
-        <header className="topbar p-4 border-b flex justify-between items-center">
-          <div className="active-symbol-info">
-            <h1>{activeSymbol}</h1>
+        <header className="topbar p-4 border-b flex justify-between items-center bg-gray-900">
+          <div className="active-symbol-info flex items-center gap-4">
+            <h1 className="text-xl font-bold">{activeSymbol}</h1>
             {prices[activeSymbol] && (
-              <span className="live-price">${prices[activeSymbol].price.toFixed(2)}</span>
+              <span className="live-price text-accent font-mono">${prices[activeSymbol].price.toFixed(2)}</span>
             )}
+          </div>
+          <div className="tabs flex gap-2">
+            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'chart' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('chart')}><BarChart2 size={16}/> Chart</button>
+            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'setup' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('setup')}><Settings size={16}/> Setups</button>
+            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'backtest' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('backtest')}><PlayCircle size={16}/> Backtest</button>
+            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'leaderboard' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('leaderboard')}><Trophy size={16}/> Leaderboard</button>
           </div>
         </header>
         
-        <div className="chart-container flex-1 relative">
-           <Chart symbol={activeSymbol} />
+        <div className="content-area flex-1 relative bg-gray-900 overflow-hidden">
+           {activeTab === 'chart' && <Chart symbol={activeSymbol} />}
+           {activeTab === 'setup' && <SetupBuilder />}
+           {activeTab === 'backtest' && <BacktestDashboard activeSymbol={activeSymbol} />}
+           {activeTab === 'leaderboard' && <Leaderboard />}
         </div>
       </main>
     </div>
