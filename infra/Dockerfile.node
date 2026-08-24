@@ -1,0 +1,68 @@
+FROM node:22-alpine AS base
+WORKDIR /app
+
+# Copy root workspace config
+COPY package.json ./
+COPY tsconfig.base.json ./
+
+# Copy package.json of all services to cache npm install globally
+COPY common/package.json ./common/
+COPY api-gateway/package.json ./api-gateway/
+COPY user-service/package.json ./user-service/
+COPY market-data-service/package.json ./market-data-service/
+COPY indicator-service/package.json ./indicator-service/
+COPY setup-service/package.json ./setup-service/
+COPY alert-service/package.json ./alert-service/
+COPY websocket-gateway/package.json ./websocket-gateway/
+COPY fundamentals-service/package.json ./fundamentals-service/
+COPY backtest-service/package.json ./backtest-service/
+
+RUN npm install
+
+# Copy common source and build it
+COPY common ./common
+WORKDIR /app/common
+RUN npm run build
+
+# Go back to app root
+WORKDIR /app
+
+# Copy prisma schema so it can be generated
+COPY user-service/prisma ./user-service/prisma
+
+# Copy service source
+ARG SERVICE_NAME
+COPY ${SERVICE_NAME} ./${SERVICE_NAME}
+WORKDIR /app/${SERVICE_NAME}
+
+# Generate prisma (fails gracefully if not a prisma service)
+RUN npx prisma generate --schema=../user-service/prisma/schema.prisma || true
+
+# Build the service
+RUN npm run build
+
+FROM node:22-alpine AS production
+ARG SERVICE_NAME
+WORKDIR /app
+
+# Copy root node_modules
+COPY --from=base /app/node_modules ./node_modules
+
+# Copy common dist
+COPY --from=base /app/common/dist ./common/dist
+COPY --from=base /app/common/package.json ./common/
+
+# Copy service dist and package.json
+COPY --from=base /app/${SERVICE_NAME}/dist ./${SERVICE_NAME}/dist
+COPY --from=base /app/${SERVICE_NAME}/package.json ./${SERVICE_NAME}/
+
+# Attempt to copy service specific node_modules if any (npm workspaces usually hoists to root, but binaries might be here)
+# We use a wildcard trick to prevent failing if the directory doesn't exist
+COPY --from=base /app/${SERVICE_NAME}/package.json /app/${SERVICE_NAME}/node_module[s] ./${SERVICE_NAME}/node_modules/
+
+# Copy prisma generated client (it's inside root node_modules/@prisma/client usually, but just in case)
+# Wait, root node_modules already has it.
+
+WORKDIR /app/${SERVICE_NAME}
+EXPOSE 3000 3001 3002 3003 3004 3005 3006 3007 3008 3009
+CMD ["node", "dist/main.js"]

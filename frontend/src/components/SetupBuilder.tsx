@@ -5,10 +5,10 @@ import './SetupBuilder.css';
 export default function SetupBuilder() {
   const [setups, setSetups] = useState<any[]>([]);
   const [name, setName] = useState('');
-  const [techCond, setTechCond] = useState([{ indicator: 'RSI', params: { period: 14 }, operator: '>', value: 70 }]);
-  const [fundCond, setFundCond] = useState([{ metric: 'peRatio', operator: '<', value: 20 }]);
+  const [techCond] = useState([{ indicator: 'RSI', params: { period: 14 }, operator: '>', value: 70 }]);
+  const [fundCond] = useState([{ metric: 'peRatio', operator: '<', value: 20 }]);
   const [fundMode, setFundMode] = useState('required_for_signal');
-  const [orderRule, setOrderRule] = useState({ stopLossPct: 5, takeProfitPct: 15 });
+  const [orderRule] = useState({ stopLossPct: 5, takeProfitPct: 15 });
 
   useEffect(() => {
     fetchSetups();

@@ -55,7 +55,7 @@ services:
 
   # ─── Message Broker ──────────────────────────────────
   kafka:
-    image: apache/kafka:3.9.0
+    image: confluentinc/cp-kafka:7.6.0
     container_name: parakh-kafka
     restart: unless-stopped
     environment:
@@ -74,13 +74,13 @@ services:
       KAFKA_NUM_PARTITIONS: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       # Cluster
-      CLUSTER_ID: parakh-kafka-cluster-001
+      CLUSTER_ID: Av_Q90GTSKKQd_o-FYJHfg
     ports:
       - "29092:29092"
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -101,7 +101,7 @@ services:
 
   # ─── Connection Pooler ────────────────────────────────
   pgbouncer:
-    image: edoburu/pgbouncer:1.23.1-p2
+    image: edoburu/pgbouncer:latest
     container_name: parakh-pgbouncer
     restart: unless-stopped
     depends_on:
@@ -130,7 +130,10 @@ services:
   # ─── Services ─────────────────────────────────────────
   api-gateway:
     build:
-      context: ../api-gateway
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: api-gateway
     container_name: parakh-api-gateway
     restart: unless-stopped
     ports:
@@ -144,7 +147,10 @@ services:
 
   user-service:
     build:
-      context: ../user-service
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: user-service
     container_name: parakh-user-service
     restart: unless-stopped
     environment:
@@ -156,7 +162,10 @@ services:
 
   market-data-service:
     build:
-      context: ../market-data-service
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: market-data-service
     container_name: parakh-market-data
     restart: unless-stopped
     environment:
@@ -171,7 +180,10 @@ services:
 
   indicator-service:
     build:
-      context: ../indicator-service
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: indicator-service
     container_name: parakh-indicator
     restart: unless-stopped
     environment:
@@ -185,7 +197,10 @@ services:
 
   setup-service:
     build:
-      context: ../setup-service
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: setup-service
     container_name: parakh-setup-service
     restart: unless-stopped
     environment:
@@ -199,7 +214,10 @@ services:
 
   alert-service:
     build:
-      context: ../alert-service
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: alert-service
     container_name: parakh-alert-service
     restart: unless-stopped
     environment:
@@ -213,7 +231,10 @@ services:
 
   websocket-gateway:
     build:
-      context: ../websocket-gateway
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: websocket-gateway
     container_name: parakh-ws-gateway
     restart: unless-stopped
     ports:
@@ -240,7 +261,10 @@ services:
 
   fundamentals-service:
     build:
-      context: ../fundamentals-service
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: fundamentals-service
     container_name: parakh-fundamentals-service
     restart: unless-stopped
     environment:
@@ -255,7 +279,10 @@ services:
 
   backtest-service:
     build:
-      context: ../backtest-service
+      context: ..
+      dockerfile: infra/Dockerfile.node
+      args:
+        SERVICE_NAME: backtest-service
     container_name: parakh-backtest-service
     restart: unless-stopped
     environment:
