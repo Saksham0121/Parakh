@@ -9,7 +9,7 @@ export const options = {
   ],
 };
 
-const BASE_URL = 'http://localhost:80/api';
+const BASE_URL = 'http://host.docker.internal:80/api';
 
 export default function () {
   const res = http.get(`${BASE_URL}/health`);

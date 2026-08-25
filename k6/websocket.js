@@ -11,7 +11,7 @@ export const options = {
 };
 
 export default function () {
-  const url = 'ws://localhost:80/socket.io/?EIO=4&transport=websocket';
+  const url = 'ws://host.docker.internal:80/socket.io/?EIO=4&transport=websocket';
   
   const res = ws.connect(url, null, function (socket) {
     socket.on('open', () => {
