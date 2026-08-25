@@ -5,7 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 
 import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import { APP_INTERCEPTOR } from '@nestjs/core';
-import { MetricsInterceptor } from '@parakh/common';
+import { MetricsInterceptor, HttpRequestDurationProvider } from '@parakh/common';
 
 
 @Module({

@@ -22,5 +22,8 @@
     "docker:down": "docker compose -f infra/docker-compose.yml down",
     "docker:logs": "docker compose -f infra/docker-compose.yml logs -f",
     "docker:build": "docker compose -f infra/docker-compose.yml build"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }

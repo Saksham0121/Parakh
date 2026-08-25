@@ -77,7 +77,7 @@ export class FundamentalsSchedulerService implements OnModuleInit {
       if (this.finnhubApiKey && !symbol.includes('BINANCE:')) {
         const url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${this.finnhubApiKey}`;
         try {
-          const res = await this.fetchBreaker.fire(url);
+          const res = (await this.fetchBreaker.fire(url)) as any;
           if (res.data && res.data.metric) {
             const metrics = res.data.metric;
             data = {

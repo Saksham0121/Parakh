@@ -55,3 +55,6 @@ export {
 
 // Metrics
 export * from './metrics';
+
+// Tracing
+export * from './tracing';
