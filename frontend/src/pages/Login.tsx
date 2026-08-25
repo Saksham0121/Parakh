@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/api';
+import { ENABLE_SIGNUP } from '../config';
 import './Auth.css';
 
 export default function Login() {
@@ -9,13 +10,21 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const login = useAuthStore((state) => state.login);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const navigate = useNavigate();
+
+  // Auto-redirect if already logged in
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const res = await api.login({ email, password });
-      login(res.user, res.access_token);
+      login(res.user, res.accessToken);
       navigate('/');
     } catch (err: any) {
       setError(err.message);
@@ -48,9 +57,11 @@ export default function Login() {
           <button type="submit">Sign In</button>
         </form>
         
-        <p className="switch-link">
-          Don't have an account? <Link to="/register">Create one</Link>
-        </p>
+        {ENABLE_SIGNUP && (
+          <p className="switch-link">
+            Don't have an account? <Link to="/register">Create one</Link>
+          </p>
+        )}
       </div>
     </div>
   );

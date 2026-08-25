@@ -3,6 +3,7 @@ import { useAuthStore } from './store/authStore';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import { ENABLE_SIGNUP } from './config';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -14,7 +15,7 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      {ENABLE_SIGNUP && <Route path="/register" element={<Register />} />}
       <Route
         path="/"
         element={

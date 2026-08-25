@@ -22,12 +22,15 @@ export class AuthMiddleware implements NestMiddleware {
   }
 
   use(req: Request, _res: Response, next: NextFunction) {
-    // Skip auth for public routes
+    console.log(`[AuthMiddleware] req.method=${req.method} req.path=${req.path} req.originalUrl=${req.originalUrl}`);
+
+    // Skip auth for public routes (ignoring query strings if any)
+    const urlPath = req.originalUrl.split('?')[0];
     const isPublic = PUBLIC_ROUTES.some(
-      (route) => req.method === route.method && req.path === route.path,
+      (route) => req.method === route.method && (urlPath === route.path || urlPath.endsWith(route.path.replace('/api', '')))
     );
 
-    if (isPublic) {
+    if (req.method === 'OPTIONS' || isPublic) {
       return next();
     }
 

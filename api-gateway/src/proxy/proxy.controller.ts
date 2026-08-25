@@ -1,8 +1,15 @@
 import { Controller, All, Req, Res, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
-import { createProxyMiddleware, RequestHandler } from 'http-proxy-middleware';
+import { createProxyMiddleware, fixRequestBody, RequestHandler } from 'http-proxy-middleware';
 import { SERVICE_PORTS } from '@parakh/common';
+
+/**
+ * Helper to determine the target host.
+ * If running in Docker (inferred by REDIS_HOST=redis), route to the container name.
+ * Otherwise, route to localhost for local development.
+ */
+const getHost = (serviceName: string) => process.env.REDIS_HOST === 'redis' ? serviceName : 'localhost';
 
 /**
  * Service route mapping.
@@ -10,35 +17,35 @@ import { SERVICE_PORTS } from '@parakh/common';
  */
 const SERVICE_ROUTES: Record<string, { target: string; pathRewrite: Record<string, string> }> = {
   '/api/auth': {
-    target: `http://localhost:${SERVICE_PORTS.USER_SERVICE}`,
+    target: `http://${getHost('user-service')}:${SERVICE_PORTS.USER_SERVICE}`,
     pathRewrite: { '^/api/auth': '/auth' },
   },
   '/api/watchlist': {
-    target: `http://localhost:${SERVICE_PORTS.USER_SERVICE}`,
+    target: `http://${getHost('user-service')}:${SERVICE_PORTS.USER_SERVICE}`,
     pathRewrite: { '^/api/watchlist': '/watchlist' },
   },
   '/api/market': {
-    target: `http://localhost:${SERVICE_PORTS.MARKET_DATA_SERVICE}`,
+    target: `http://${getHost('market-data-service')}:${SERVICE_PORTS.MARKET_DATA_SERVICE}`,
     pathRewrite: { '^/api/market': '/market' },
   },
   '/api/indicators': {
-    target: `http://localhost:${SERVICE_PORTS.INDICATOR_SERVICE}`,
+    target: `http://${getHost('indicator-service')}:${SERVICE_PORTS.INDICATOR_SERVICE}`,
     pathRewrite: { '^/api/indicators': '/indicators' },
   },
   '/api/setups': {
-    target: `http://localhost:${SERVICE_PORTS.SETUP_SERVICE}`,
+    target: `http://${getHost('setup-service')}:${SERVICE_PORTS.SETUP_SERVICE}`,
     pathRewrite: { '^/api/setups': '/setups' },
   },
   '/api/alerts': {
-    target: `http://localhost:${SERVICE_PORTS.ALERT_SERVICE}`,
+    target: `http://${getHost('alert-service')}:${SERVICE_PORTS.ALERT_SERVICE}`,
     pathRewrite: { '^/api/alerts': '/alerts' },
   },
   '/api/backtests': {
-    target: `http://localhost:${SERVICE_PORTS.BACKTEST_SERVICE}`,
+    target: `http://${getHost('backtest-service')}:${SERVICE_PORTS.BACKTEST_SERVICE}`,
     pathRewrite: { '^/api/backtests': '/backtests' },
   },
   '/api/fundamentals': {
-    target: `http://localhost:${SERVICE_PORTS.FUNDAMENTALS_SERVICE}`,
+    target: `http://${getHost('fundamentals-service')}:${SERVICE_PORTS.FUNDAMENTALS_SERVICE}`,
     pathRewrite: { '^/api/fundamentals': '/fundamentals' },
   },
 };
@@ -57,6 +64,7 @@ export class ProxyController {
           changeOrigin: true,
           pathRewrite: config.pathRewrite,
           on: {
+            proxyReq: fixRequestBody,
             error: (err, _req, res) => {
               const response = res as Response;
               if (!response.headersSent) {
@@ -74,9 +82,10 @@ export class ProxyController {
 
   @All('*')
   async handleProxy(@Req() req: Request, @Res() res: Response) {
-    // Find matching proxy
+    // NestJS strips the global prefix from req.path, so use req.originalUrl for matching
+    const urlPath = req.originalUrl.split('?')[0];
     for (const [prefix, proxy] of this.proxies) {
-      if (req.path.startsWith(prefix)) {
+      if (urlPath.startsWith(prefix)) {
         return (proxy as any)(req, res, () => {});
       }
     }

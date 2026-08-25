@@ -18,7 +18,7 @@ export default function Register() {
       await api.register({ email, password, name });
       // Registration successful, auto-login
       const loginRes = await api.login({ email, password });
-      login(loginRes.user, loginRes.access_token);
+      login(loginRes.user, loginRes.accessToken);
       navigate('/');
     } catch (err: any) {
       setError(err.message);
