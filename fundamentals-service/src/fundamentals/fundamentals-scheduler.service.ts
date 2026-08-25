@@ -5,12 +5,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { createLogger } from '@parakh/common';
 import axios from 'axios';
+import CircuitBreaker from 'opossum';
 
 const logger = createLogger({ service: 'fundamentals-scheduler' });
 
 @Injectable()
 export class FundamentalsSchedulerService implements OnModuleInit {
   private finnhubApiKey: string;
+  private fetchBreaker: CircuitBreaker;
 
   constructor(
     private prisma: PrismaService,
@@ -18,6 +20,20 @@ export class FundamentalsSchedulerService implements OnModuleInit {
     private configService: ConfigService,
   ) {
     this.finnhubApiKey = this.configService.get<string>('FINNHUB_API_KEY', '');
+    
+    // Circuit breaker for Finnhub API calls
+    this.fetchBreaker = new CircuitBreaker(
+      (url: string) => axios.get(url),
+      {
+        timeout: 10000,     // 10 second timeout
+        errorThresholdPercentage: 50, // open circuit if 50% of requests fail
+        resetTimeout: 30000, // 30 seconds before trying again
+      },
+    );
+
+    this.fetchBreaker.on('open', () => logger.warn('Finnhub fundamentals circuit breaker opened'));
+    this.fetchBreaker.on('halfOpen', () => logger.info('Finnhub fundamentals circuit breaker half-open'));
+    this.fetchBreaker.on('close', () => logger.info('Finnhub fundamentals circuit breaker closed'));
   }
 
   async onModuleInit() {
@@ -54,28 +70,32 @@ export class FundamentalsSchedulerService implements OnModuleInit {
     }
   }
 
-  private async syncSymbolFundamentals(symbol: string) {
+    private async syncSymbolFundamentals(symbol: string) {
     try {
       let data: any = null;
 
       if (this.finnhubApiKey && !symbol.includes('BINANCE:')) {
         const url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${this.finnhubApiKey}`;
-        const res = await axios.get(url);
-        if (res.data && res.data.metric) {
-          const metrics = res.data.metric;
-          data = {
-            symbol,
-            peRatio: metrics.peNormalizedAnnual || metrics.peTTM || null,
-            eps: metrics.epsNormalizedAnnual || metrics.epsTTM || null,
-            roe: metrics.roeTTM || null,
-            debtToEquity: metrics.totalDebtToEquityAnnual || metrics.totalDebtToEquityQuarterly || null,
-            marketCap: metrics.marketCapitalization || null,
-            sector: res.data.profile?.finnhubIndustry || null,
-          };
+        try {
+          const res = await this.fetchBreaker.fire(url);
+          if (res.data && res.data.metric) {
+            const metrics = res.data.metric;
+            data = {
+              symbol,
+              peRatio: metrics.peNormalizedAnnual || metrics.peTTM || null,
+              eps: metrics.epsNormalizedAnnual || metrics.epsTTM || null,
+              roe: metrics.roeTTM || null,
+              debtToEquity: metrics.totalDebtToEquityAnnual || metrics.totalDebtToEquityQuarterly || null,
+              marketCap: metrics.marketCapitalization || null,
+              sector: res.data.profile?.finnhubIndustry || null,
+            };
+          }
+        } catch (error) {
+          logger.error(`Finnhub request failed for ${symbol} via circuit breaker`, { error });
         }
       }
 
-      // Mock data if API is not available or for crypto
+      // Mock data if API is not available, circuit opened, or for crypto
       if (!data) {
         data = this.generateMockFundamentals(symbol);
       }
