@@ -1,3 +1,6 @@
+import { initTracing } from '@parakh/common';
+initTracing('user-service');
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';

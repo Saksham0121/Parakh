@@ -1,3 +1,6 @@
+import { initTracing } from '@parakh/common';
+initTracing('fundamentals-service');
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { createLogger } from '@parakh/common';

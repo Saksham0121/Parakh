@@ -1,4 +1,5 @@
 import { Kafka, Producer, Consumer, KafkaConfig, ProducerConfig, ConsumerConfig, EachMessagePayload } from 'kafkajs';
+import { propagation, context } from '@opentelemetry/api';
 
 export interface KafkaClientOptions {
   clientId: string;
@@ -40,12 +41,18 @@ export class KafkaClient {
    */
   async publish(topic: string, key: string, value: unknown): Promise<void> {
     const producer = await this.getProducer();
+    
+    // Inject OpenTelemetry trace context into headers
+    const headers: Record<string, string> = {};
+    propagation.inject(context.active(), headers);
+
     await producer.send({
       topic,
       messages: [
         {
           key,
           value: JSON.stringify(value),
+          headers: headers as any, // Cast to any to satisfy Kafka headers type
           timestamp: Date.now().toString(),
         },
       ],
@@ -74,7 +81,20 @@ export class KafkaClient {
     }
 
     await consumer.run({
-      eachMessage: handler,
+      eachMessage: async (payload) => {
+        // Extract trace context from headers
+        let extractedContext = context.active();
+        if (payload.message.headers) {
+          const stringHeaders: Record<string, string> = {};
+          for (const [k, v] of Object.entries(payload.message.headers)) {
+            if (v) stringHeaders[k] = v.toString();
+          }
+          extractedContext = propagation.extract(context.active(), stringHeaders);
+        }
+
+        // Run the handler inside the extracted trace context
+        await context.with(extractedContext, () => handler(payload));
+      },
     });
 
     this.consumers.set(groupId, consumer);
