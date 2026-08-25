@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:3000']
+  
+  - job_name: 'user-service'
+    static_configs:
+      - targets: ['user-service:3001']
+
+  - job_name: 'market-data-service'
+    static_configs:
+      - targets: ['market-data-service:3002']
+
+  - job_name: 'indicator-service'
+    static_configs:
+      - targets: ['indicator-service:3003']
+
+  - job_name: 'setup-service'
+    static_configs:
+      - targets: ['setup-service:3004']
+
+  - job_name: 'alert-service'
+    static_configs:
+      - targets: ['alert-service:3005']
+
+  - job_name: 'backtest-service'
+    static_configs:
+      - targets: ['backtest-service:3006']
+
+  - job_name: 'fundamentals-service'
+    static_configs:
+      - targets: ['fundamentals-service:3007']
+
+  - job_name: 'websocket-gateway'
+    static_configs:
+      - targets: ['websocket-gateway:3009']
+      
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'kafka-exporter'
+    static_configs:
+      - targets: ['kafka-exporter:9308']

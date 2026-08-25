@@ -7,13 +7,22 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
 import { AuthMiddleware } from './middleware/auth.middleware';
 import { HealthController } from './health/health.controller';
 
+import { PrometheusModule } from '@willsoto/nestjs-prometheus';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { MetricsInterceptor } from '@parakh/common';
+
+
 @Module({
   imports: [
+    PrometheusModule.register(),
     ConfigModule.forRoot({ isGlobal: true }),
     JwtModule.register({}),
     TerminusModule,
     ProxyModule,
     RateLimitModule,
+  ],
+  providers: [
+    { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
   controllers: [HealthController],
 })

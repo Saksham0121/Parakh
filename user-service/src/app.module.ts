@@ -6,13 +6,22 @@ import { AuthModule } from './auth/auth.module';
 import { WatchlistModule } from './watchlist/watchlist.module';
 import { HealthModule } from './health/health.module';
 
+import { PrometheusModule } from '@willsoto/nestjs-prometheus';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { MetricsInterceptor } from '@parakh/common';
+
+
 @Module({
   imports: [
+    PrometheusModule.register(),
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     AuthModule,
     WatchlistModule,
     HealthModule,
+  ],
+  providers: [
+    { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
 })
 export class AppModule {}
