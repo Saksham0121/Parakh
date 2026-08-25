@@ -4,25 +4,35 @@ This document tracks the architecture and data flow of the Parakh platform as it
 
 ---
 
-## Current State: Phase 1.1 — Foundation
+## Current State: Phase 3 — Observability, Resilience, and Polish
 
 ### What's been set up
-- **Monorepo structure** with npm workspaces (all services share one repo, each with independent package.json)
-- **`@parakh/common`** package — shared DTOs, Kafka wrapper, logger, constants
+- **Monorepo structure** with npm workspaces
+- **`@parakh/common`** package — shared DTOs, Kafka wrapper, logger, metrics/tracing interceptors, constants
 - **Infrastructure** — Docker Compose with PostgreSQL, TimescaleDB, Redis, Kafka, Nginx
-- **Environment config** — `.env.example` with all service variables
+- **Observability** — Prometheus, Grafana, Node Exporter, Kafka Exporter, Jaeger (OTel), VictoriaLogs + Vector
+- **Resilience** — Opossum Circuit Breakers for Finnhub API calls
+- **Scaling** — API Gateway scaled to 3 instances via Docker Compose replicas
 
 ### Directory Layout
 ```
 Parakh/
+├── api-gateway/         # Scaled to 3 replicas
+├── alert-service/
+├── backtest-service/
 ├── common/              # Shared package (@parakh/common)
-├── infra/               # Docker, Nginx, monitoring configs
+├── frontend/            # React frontend
+├── fundamentals-service/
+├── indicator-service/
+├── market-data-service/
+├── setup-service/
+├── user-service/
+├── websocket-gateway/
+├── infra/               # Docker, Nginx, Prometheus, Grafana, Vector configs
 │   ├── docker-compose.yml
 │   └── nginx/nginx.conf
 ├── package.json         # Root workspace config
 ├── tsconfig.base.json   # Shared TypeScript settings
-├── .env.example         # Environment template
-├── .gitignore
 └── flow.md              # This file
 ```
 
@@ -35,36 +45,36 @@ Parakh/
                │                  │
         HTTP traffic         WebSocket
                │                  │
-       ┌───────┴───────┐  ┌──────┴──────┐
-       │  API Gateway  │  │  WS Gateway │
-       └───────────────┘  └─────────────┘
-               │
-    ┌──────────┼──────────────┐
-    │          │              │
-┌───┴───┐ ┌───┴────┐  ┌─────┴─────┐
-│Postgres│ │  Redis │  │   Kafka   │
-│        │ │        │  │  (KRaft)  │
-└────────┘ └────────┘  └───────────┘
-    │
-┌───┴────────┐
-│TimescaleDB │
-│(time-series)│
-└─────────────┘
+     ┌─────────┴─────────┐  ┌─────┴───────┐
+     │  API Gateway (x3) │  │  WS Gateway │
+     └─────────┬─────────┘  └──────┬──────┘
+               │                   │
+    ┌──────────┼───────────────┬───┴──────────┐
+    │          │               │              │
+┌───┴───┐ ┌────┴────┐  ┌───────┴──────┐ ┌─────┴─────┐
+│Postgres│ │  Redis  │  │    Kafka     │ │ Victoria  │
+│        │ │         │  │   (KRaft)    │ │   Logs    │
+└────────┘ └─────────┘  └──────────────┘ └───────────┘
+    │                                          ▲
+┌───┴────────┐  ┌─────────────┐                │
+│TimescaleDB │  │ Prometheus  │  Vector (Docker Logs)
+│(time-series)│  │ & Grafana   │
+└─────────────┘  └─────────────┘
 ```
 
-### Data Flow (planned for Phase 1)
+### Data Flow (Phase 3)
 ```
-Finnhub API ──→ market-data-service ──→ Kafka [price-ticks]
-                                              │
-                              ┌───────────────┼───────────────┐
-                              │               │               │
-                     indicator-service   ws-gateway     alert-service
-                              │               │               │
-                     Kafka [indicator-    Push to       Kafka [alert-fired]
-                      updates]           clients              │
-                              │                        notification-service
-                         TimescaleDB                          │
-                                                         Email + WS
+Finnhub API ──(Circuit Breaker)──→ market-data-service ──→ Kafka [price-ticks]
+                                               │
+                               ┌───────────────┼───────────────┐
+                               │               │               │
+                      indicator-service   ws-gateway     alert-service
+                               │               │               │
+                      Kafka [indicator-    Push to       Kafka [alert-fired]
+                       updates]           clients              │
+                               │                        notification-service
+                          TimescaleDB                          │
+                                                          Email + WS
 ```
 
 ---
