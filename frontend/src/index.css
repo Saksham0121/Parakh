@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 :root {
   /* THE BLUEPRINT DESIGN SYSTEM */
   --bg-base: #07090C;

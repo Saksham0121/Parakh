@@ -17,6 +17,7 @@ interface SocketState {
   disconnect: () => void;
   subscribeSymbol: (symbol: string) => void;
   unsubscribeSymbol: (symbol: string) => void;
+  setPrice: (tick: PriceTick) => void;
 }
 
 export const useSocketStore = create<SocketState>((set, get) => ({
@@ -72,5 +73,11 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
   unsubscribeSymbol: (symbol: string) => {
     get().socket?.emit('unsubscribe:symbol', { symbol });
+  },
+
+  setPrice: (tick: PriceTick) => {
+    set((state) => ({
+      prices: { ...state.prices, [tick.symbol]: tick },
+    }));
   },
 }));

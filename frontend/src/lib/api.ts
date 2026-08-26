@@ -39,6 +39,8 @@ export const api = {
   getCandles: (symbol: string, resolution: string, from: number, to: number) => 
     fetchWithAuth(`/market/candles/${symbol}?resolution=${resolution}&from=${from}&to=${to}`),
   
+  getQuote: (symbol: string) => fetchWithAuth(`/market/quote/${symbol}`),
+
   searchSymbol: (query: string) => fetchWithAuth(`/market/search?q=${query}`),
 
   getSetups: () => fetchWithAuth('/setups'),

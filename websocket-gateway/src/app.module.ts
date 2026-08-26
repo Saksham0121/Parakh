@@ -12,6 +12,7 @@ import { MetricsInterceptor, HttpRequestDurationProvider } from '@parakh/common'
   imports: [
     PrometheusModule.register(),ConfigModule.forRoot({ isGlobal: true })],
   providers: [
+    HttpRequestDurationProvider,
     { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },PriceGateway, KafkaConsumerService],
 })
 export class AppModule {}

@@ -1,39 +1,21 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { createLogger } from '@parakh/common';
-import axios from 'axios';
-import CircuitBreaker from 'opossum';
+import YahooFinance from 'yahoo-finance2';
 
 const logger = createLogger({ service: 'fundamentals-scheduler' });
 
 @Injectable()
 export class FundamentalsSchedulerService implements OnModuleInit {
-  private finnhubApiKey: string;
-  private fetchBreaker: CircuitBreaker;
+  private yf: InstanceType<typeof YahooFinance>;
 
   constructor(
     private prisma: PrismaService,
     private redis: RedisService,
-    private configService: ConfigService,
   ) {
-    this.finnhubApiKey = this.configService.get<string>('FINNHUB_API_KEY', '');
-    
-    // Circuit breaker for Finnhub API calls
-    this.fetchBreaker = new CircuitBreaker(
-      (url: string) => axios.get(url),
-      {
-        timeout: 10000,     // 10 second timeout
-        errorThresholdPercentage: 50, // open circuit if 50% of requests fail
-        resetTimeout: 30000, // 30 seconds before trying again
-      },
-    );
-
-    this.fetchBreaker.on('open', () => logger.warn('Finnhub fundamentals circuit breaker opened'));
-    this.fetchBreaker.on('halfOpen', () => logger.info('Finnhub fundamentals circuit breaker half-open'));
-    this.fetchBreaker.on('close', () => logger.info('Finnhub fundamentals circuit breaker closed'));
+    this.yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
   }
 
   async onModuleInit() {
@@ -60,8 +42,7 @@ export class FundamentalsSchedulerService implements OnModuleInit {
 
       for (const symbol of uniqueSymbols) {
         await this.syncSymbolFundamentals(symbol);
-        // Sleep to avoid rate limits (Finnhub allows 60 calls/min free tier)
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
       
       logger.info('Fundamentals sync complete');
@@ -70,30 +51,63 @@ export class FundamentalsSchedulerService implements OnModuleInit {
     }
   }
 
-    private async syncSymbolFundamentals(symbol: string) {
+  private async syncSymbolFundamentals(symbol: string) {
     try {
       let data: any = null;
+      const cleanSymbol = symbol.replace(/^BINANCE:/i, '').replace(/USDT$/i, '-USD');
 
-      if (this.finnhubApiKey && !symbol.includes('BINANCE:')) {
-        const url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${this.finnhubApiKey}`;
-        try {
-          const res = (await this.fetchBreaker.fire(url)) as any;
-          if (res.data && res.data.metric) {
-            const metrics = res.data.metric;
-            data = {
-              symbol,
-              peRatio: metrics.peNormalizedAnnual || metrics.peTTM || null,
-              eps: metrics.epsNormalizedAnnual || metrics.epsTTM || null,
-              roe: metrics.roeTTM || null,
-              debtToEquity: metrics.totalDebtToEquityAnnual || metrics.totalDebtToEquityQuarterly || null,
-              marketCap: metrics.marketCapitalization || null,
-              sector: res.data.profile?.finnhubIndustry || null,
-            };
-          }
-        } catch (error) {
-          logger.error(`Finnhub request failed for ${symbol} via circuit breaker`, { error });
+      try {
+        const summary = await this.yf.quoteSummary(cleanSymbol, {
+          modules: ['summaryProfile', 'financialData', 'defaultKeyStatistics', 'price'],
+        });
+
+        if (summary) {
+          const stats = summary.defaultKeyStatistics;
+          const fin = summary.financialData;
+          const profile = summary.summaryProfile;
+          const price = summary.price;
+
+          data = {
+            symbol,
+            peRatio: stats?.trailingPE || stats?.forwardPE || null,
+            eps: stats?.trailingEps || null,
+            roe: fin?.returnOnEquity ? fin.returnOnEquity * 100 : null,
+            debtToEquity: fin?.debtToEquity || null,
+            marketCap: price?.marketCap || null,
+            sector: profile?.sector || 'Equities',
+          };
         }
+      } catch (error: any) {
+        logger.warn(`Yahoo Finance quoteSummary failed for ${symbol}`, { error: error.message });
       }
+
+      // Mock data if API is not available (e.g. for crypto or unavailable tickers)
+      if (!data) {
+        data = this.generateMockFundamentals(symbol);
+      }
+
+      // Upsert to DB
+      const updated = await this.prisma.companyFundamentals.upsert({
+        where: { symbol },
+        update: {
+          peRatio: data.peRatio,
+          eps: data.eps,
+          roe: data.roe,
+          debtToEquity: data.debtToEquity,
+          marketCap: data.marketCap,
+          sector: data.sector,
+        },
+        create: data,
+      });
+
+      // Cache in Redis for quick access by Alert/Backtest services
+      await this.redis.client.set(`fundamentals:${symbol}`, JSON.stringify(updated));
+
+      logger.info(`Synced fundamentals for ${symbol}`);
+    } catch (err) {
+      logger.error(`Failed to sync fundamentals for ${symbol}`, { error: err });
+    }
+  }
 
       // Mock data if API is not available, circuit opened, or for crypto
       if (!data) {

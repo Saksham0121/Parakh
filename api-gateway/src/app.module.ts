@@ -15,13 +15,17 @@ import { MetricsInterceptor, HttpRequestDurationProvider } from '@parakh/common'
 @Module({
   imports: [
     PrometheusModule.register(),
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ 
+      isGlobal: true,
+      envFilePath: ['.env', '../.env', '../../.env'],
+    }),
     JwtModule.register({}),
     TerminusModule,
     ProxyModule,
     RateLimitModule,
   ],
   providers: [
+    HttpRequestDurationProvider,
     { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
   controllers: [HealthController],

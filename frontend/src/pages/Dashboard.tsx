@@ -8,7 +8,7 @@ import SetupBuilder from '../components/SetupBuilder';
 import BacktestDashboard from '../components/BacktestDashboard';
 import Leaderboard from '../components/Leaderboard';
 import '../components/Workspace.css';
-import { Activity, BarChart3, ChevronDown, LogOut, Menu, PlayCircle, Plus, Search, Settings2, Trophy, X } from 'lucide-react';
+import { BarChart3, LogOut, Menu, PlayCircle, Plus, Settings2, Trophy, X } from 'lucide-react';
 import './Dashboard.css';
 
 type Tab = 'chart' | 'setup' | 'backtest' | 'leaderboard';
@@ -22,12 +22,12 @@ const tabs: Array<{ id: Tab; label: string; icon: typeof BarChart3 }> = [
 
 export default function Dashboard() {
   const { user, logout } = useAuthStore();
-  const { connect, disconnect, subscribeSymbol, prices } = useSocketStore();
+  const { connect, disconnect, subscribeSymbol, prices, setPrice } = useSocketStore();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [watchlist, setWatchlist] = useState<any[]>([]);
-  const [activeSymbol, setActiveSymbol] = useState('BINANCE:BTCUSDT');
+  const [activeSymbol, setActiveSymbol] = useState('AAPL');
   const [activeTab, setActiveTab] = useState<Tab>('chart');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
@@ -50,19 +50,57 @@ export default function Dashboard() {
   useEffect(() => {
     connect();
     fetchWatchlist();
-    subscribeSymbol(activeSymbol);
     return () => disconnect();
   }, []);
 
+  // Fetch initial quote & subscribe to live updates when activeSymbol changes
   useEffect(() => {
-    if (activeSymbol) subscribeSymbol(activeSymbol);
+    if (!activeSymbol) return;
+    subscribeSymbol(activeSymbol);
+
+    // Immediate REST quote fetch so user doesn't wait for WebSocket tick
+    const fetchInitialQuote = async () => {
+      try {
+        const cleanSym = activeSymbol.replace('BINANCE:', '');
+        const quote = await api.getQuote(cleanSym);
+        if (quote && (quote.c || quote.price)) {
+          setPrice({
+            symbol: activeSymbol,
+            price: quote.c || quote.price,
+            timestamp: quote.t || Math.floor(Date.now() / 1000),
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch initial quote', err);
+      }
+    };
+
+    fetchInitialQuote();
   }, [activeSymbol]);
 
   const fetchWatchlist = async () => {
     try {
       const result = await api.getWatchlist();
       setWatchlist(result);
-      if (result.length > 0 && activeSymbol === 'BINANCE:BTCUSDT') setActiveSymbol(result[0].symbol);
+      if (result.length > 0 && (activeSymbol === 'BINANCE:BTCUSDT' || activeSymbol === 'AAPL')) {
+        setActiveSymbol(result[0].symbol);
+      }
+
+      // Fetch initial prices for all watchlist items
+      for (const item of result) {
+        if (!prices[item.symbol]) {
+          const clean = item.symbol.replace('BINANCE:', '');
+          api.getQuote(clean).then((quote) => {
+            if (quote && (quote.c || quote.price)) {
+              setPrice({
+                symbol: item.symbol,
+                price: quote.c || quote.price,
+                timestamp: quote.t || Math.floor(Date.now() / 1000),
+              });
+            }
+          }).catch(() => {});
+        }
+      }
     } catch (error) {
       console.error('Failed to fetch watchlist', error);
     }

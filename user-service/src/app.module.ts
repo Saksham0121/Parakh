@@ -21,6 +21,7 @@ import { MetricsInterceptor, HttpRequestDurationProvider } from '@parakh/common'
     HealthModule,
   ],
   providers: [
+    HttpRequestDurationProvider,
     { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
 })

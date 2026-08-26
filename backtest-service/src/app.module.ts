@@ -18,6 +18,7 @@ import { MetricsInterceptor, HttpRequestDurationProvider } from '@parakh/common'
     BacktestModule,
   ],
   providers: [
+    HttpRequestDurationProvider,
     { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
 })

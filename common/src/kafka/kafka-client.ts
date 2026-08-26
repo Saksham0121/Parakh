@@ -121,7 +121,7 @@ export class KafkaClient {
  * Factory function to create a KafkaClient from environment variables.
  */
 export function createKafkaClient(clientId?: string): KafkaClient {
-  const brokers = (process.env.KAFKA_BROKERS || 'localhost:9092').split(',');
+  const brokers = (process.env.KAFKA_BROKERS || 'localhost:29092').split(',');
   const id = clientId || process.env.KAFKA_CLIENT_ID || 'parakh';
 
   return new KafkaClient({ clientId: id, brokers });

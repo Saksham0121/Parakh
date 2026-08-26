@@ -20,6 +20,7 @@ import { MetricsInterceptor, HttpRequestDurationProvider } from '@parakh/common'
     FundamentalsModule,
   ],
   providers: [
+    HttpRequestDurationProvider,
     { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
 })

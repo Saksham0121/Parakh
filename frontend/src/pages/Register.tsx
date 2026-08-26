@@ -7,7 +7,6 @@ import './Auth.css';
 export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const login = useAuthStore((state) => state.login);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -22,7 +21,7 @@ export default function Register() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await api.register({ email, password, name });
+      const res = await api.register({ email, password });
       login(res.user, res.accessToken);
       navigate('/');
     } catch (err: any) {
@@ -36,7 +35,7 @@ export default function Register() {
       <div className="blueprint-auth-hero">
         <div className="blueprint-auth-hero-content">
           <h1>Parakh Engine</h1>
-          <p>Enterprise-grade algorithmic trading and backtesting platform. Connect, analyze, and automate.</p>
+          <p>Trading Intelligence</p>
         </div>
       </div>
 
@@ -50,13 +49,6 @@ export default function Register() {
           {error && <div className="error-banner">{error}</div>}
           
           <form onSubmit={handleSubmit}>
-            <input
-              type="text"
-              placeholder="FULL_NAME"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
             <input
               type="email"
               placeholder="EMAIL_ADDRESS"

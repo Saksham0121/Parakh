@@ -36,7 +36,7 @@ export default function Login() {
       <div className="blueprint-auth-hero">
         <div className="blueprint-auth-hero-content">
           <h1>Parakh Engine</h1>
-          <p>Enterprise-grade algorithmic trading and backtesting platform. Connect, analyze, and automate.</p>
+          <p>Trading Intelligence</p>
         </div>
       </div>
 

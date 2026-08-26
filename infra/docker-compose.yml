@@ -171,7 +171,6 @@ services:
     environment:
       - KAFKA_BROKERS=kafka:9092
       - REDIS_HOST=redis
-      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
     depends_on:
       kafka:
         condition: service_healthy
@@ -270,7 +269,6 @@ services:
     environment:
       - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
       - REDIS_HOST=redis
-      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -289,7 +287,6 @@ services:
       - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
       - KAFKA_BROKERS=kafka:9092
       - REDIS_HOST=redis
-      - FINNHUB_API_KEY=${FINNHUB_API_KEY}
     depends_on:
       kafka:
         condition: service_healthy

@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { createKafkaClient, KafkaClient, KAFKA_TOPICS, createLogger, evaluateCondition, evaluateFundamentalConditions } from '@parakh/common';
 import { RedisService } from '../redis/redis.service';
-import axios from 'axios';
+import YahooFinance from 'yahoo-finance2';
 import { ConfigService } from '@nestjs/config';
 import { SMA, RSI, MACD, BollingerBands } from 'technicalindicators';
 
@@ -11,7 +11,7 @@ const logger = createLogger({ service: 'backtest-worker' });
 @Injectable()
 export class BacktestWorkerService implements OnModuleInit, OnModuleDestroy {
   private kafkaClient: KafkaClient;
-  private finnhubApiKey: string;
+  private yf: InstanceType<typeof YahooFinance>;
 
   constructor(
     private prisma: PrismaService,
@@ -19,7 +19,7 @@ export class BacktestWorkerService implements OnModuleInit, OnModuleDestroy {
     private configService: ConfigService,
   ) {
     this.kafkaClient = createKafkaClient('backtest-worker');
-    this.finnhubApiKey = this.configService.get<string>('FINNHUB_API_KEY', '');
+    this.yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
   }
 
   async onModuleInit() {
@@ -45,18 +45,33 @@ export class BacktestWorkerService implements OnModuleInit, OnModuleDestroy {
       const setup = await this.prisma.setup.findUnique({ where: { id: job.setupId } });
       if (!setup) throw new Error('Setup not found');
 
-      // 2. Fetch Historical Data (mocking TimescaleDB with Finnhub REST for MVP)
-      const resolution = 'D';
+      // 2. Fetch Historical Data from Yahoo Finance
       const from = Math.floor(job.startDate / 1000);
       const to = Math.floor(job.endDate / 1000);
       
+      let cleanSymbol = job.symbol.replace(/^BINANCE:/i, '').replace(/USDT$/i, '-USD');
       let data: any = { t: [], o: [], h: [], l: [], c: [], v: [] };
-      if (this.finnhubApiKey && !job.symbol.includes('BINANCE:')) {
-        const url = `https://finnhub.io/api/v1/stock/candle?symbol=${job.symbol}&resolution=${resolution}&from=${from}&to=${to}&token=${this.finnhubApiKey}`;
-        const res = await axios.get(url);
-        if (res.data && res.data.s === 'ok') {
-          data = res.data;
+
+      try {
+        const chartRes = await this.yf.chart(cleanSymbol, {
+          period1: new Date(from * 1000),
+          period2: new Date(to * 1000),
+          interval: '1d',
+        });
+
+        if (chartRes && chartRes.quotes && chartRes.quotes.length > 0) {
+          for (const q of chartRes.quotes) {
+            if (q.close == null || q.open == null) continue;
+            data.t.push(Math.floor(new Date(q.date).getTime() / 1000));
+            data.o.push(q.open);
+            data.h.push(q.high);
+            data.l.push(q.low);
+            data.c.push(q.close);
+            data.v.push(q.volume || 0);
+          }
         }
+      } catch (err) {
+        logger.warn('Yahoo Finance backtest fetch failed, using fallback mock candles', { error: err });
       }
 
       if (data.t.length === 0) {
