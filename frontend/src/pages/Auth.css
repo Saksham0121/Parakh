@@ -1,57 +1,160 @@
-.auth-container {
-  background: radial-gradient(circle at 50% -20%, #1a2333, var(--bg-dark));
+.blueprint-auth-layout {
+  display: grid;
+  grid-template-columns: 1fr 450px;
+  width: 100vw;
+  min-height: 100dvh;
+  background: var(--bg-base);
 }
 
-.auth-card {
-  width: 100%;
-  max-width: 400px;
-  background: rgba(22, 24, 29, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+.blueprint-auth-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4rem;
+  border-right: 1px solid var(--border-grid);
+  position: relative;
+  overflow: hidden;
 }
 
-.auth-card h2 {
-  font-size: 1.75rem;
-  font-weight: 600;
-  text-align: center;
+/* The hero gets an extra dense grid overlay */
+.blueprint-auth-hero::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: 
+    linear-gradient(var(--border-strong) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-strong) 1px, transparent 1px);
+  background-size: 20px 20px;
+  opacity: 0.3;
+  z-index: 0;
 }
 
-.subtitle {
-  color: var(--text-muted);
-  text-align: center;
+.blueprint-auth-hero-content {
+  position: relative;
+  z-index: 1;
+  max-width: 600px;
+}
+
+.blueprint-auth-hero h1 {
+  font-family: var(--font-mono);
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--text-primary);
   margin-bottom: 1rem;
+  text-transform: uppercase;
 }
 
-.error-banner {
-  background: rgba(239, 68, 68, 0.1);
-  color: var(--danger);
-  padding: 0.75rem;
-  border-radius: 6px;
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  font-size: 0.875rem;
-  text-align: center;
+.blueprint-auth-hero p {
+  font-size: 1.2rem;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
-.auth-card input {
-  padding: 0.75rem 1rem;
-  font-size: 1rem;
-  background: rgba(15, 17, 21, 0.6);
+.blueprint-auth-sidebar {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3rem;
+  background: var(--bg-panel);
 }
 
-.auth-card button {
-  padding: 0.875rem;
-  font-size: 1rem;
-  font-weight: 500;
-  margin-top: 0.5rem;
+.blueprint-auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.blueprint-auth-card h2 {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.blueprint-auth-card .subtitle {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: -16px;
+}
+
+.blueprint-auth-card form {
+  display: grid;
+  gap: 16px;
+}
+
+.blueprint-auth-card input {
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  background: var(--bg-base);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.blueprint-auth-card input:focus {
+  background: var(--bg-hover);
+  border-color: var(--accent-primary);
+}
+
+.blueprint-auth-card form button {
+  height: 48px;
+  margin-top: 8px;
+  background: var(--accent-primary);
+  color: white;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--accent-primary);
+}
+
+.blueprint-auth-card form button:hover {
+  background: var(--accent-hover);
 }
 
 .switch-link {
-  text-align: center;
-  font-size: 0.875rem;
   color: var(--text-muted);
-  margin-top: 1rem;
+  font-size: 0.85rem;
+  text-align: left;
+  margin-top: 16px;
+  font-family: var(--font-mono);
+}
+
+.switch-link a {
+  color: var(--accent-primary);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.switch-link a:hover {
+  text-decoration: underline;
+}
+
+.error-banner {
+  padding: 12px 16px;
+  border: 1px solid var(--signal-short);
+  background: var(--signal-short-dim);
+  color: var(--signal-short);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .blueprint-auth-layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .blueprint-auth-hero {
+    display: none; /* Hide hero on small screens to save space */
+  }
+  
+  .blueprint-auth-sidebar {
+    padding: 2rem;
+    border-left: none;
+  }
 }

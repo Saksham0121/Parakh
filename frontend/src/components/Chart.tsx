@@ -21,11 +21,30 @@ export default function Chart({ symbol }: ChartProps) {
     const chart = init(chartRef.current, {
       styles: {
         grid: {
-          horizontal: { color: '#2e3340' },
-          vertical: { color: '#2e3340' }
+          horizontal: { color: '#1C2333', style: 'solid', size: 1 },
+          vertical: { color: '#1C2333', style: 'solid', size: 1 }
         },
         candle: {
-          type: 'candle_solid' as any
+          type: 'candle_solid',
+          bar: {
+            upColor: '#00E676',
+            downColor: '#FF3B30',
+            noChangeColor: '#7A8B9E',
+            upBorderColor: '#00E676',
+            downBorderColor: '#FF3B30',
+            noChangeBorderColor: '#7A8B9E',
+            upWickColor: '#00E676',
+            downWickColor: '#FF3B30',
+            noChangeWickColor: '#7A8B9E'
+          }
+        },
+        yAxis: {
+          axisLine: { color: '#1C2333', size: 1 },
+          tickText: { color: '#7A8B9E', family: 'JetBrains Mono', size: 11 }
+        },
+        xAxis: {
+          axisLine: { color: '#1C2333', size: 1 },
+          tickText: { color: '#7A8B9E', family: 'JetBrains Mono', size: 11 }
         }
       }
     });

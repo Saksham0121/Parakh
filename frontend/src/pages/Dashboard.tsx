@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useSocketStore } from '../store/socketStore';
@@ -7,73 +7,103 @@ import Chart from '../components/Chart';
 import SetupBuilder from '../components/SetupBuilder';
 import BacktestDashboard from '../components/BacktestDashboard';
 import Leaderboard from '../components/Leaderboard';
-import { LogOut, Search, Activity, BarChart2, Settings, PlayCircle, Trophy } from 'lucide-react';
+import '../components/Workspace.css';
+import { Activity, BarChart3, ChevronDown, LogOut, Menu, PlayCircle, Plus, Search, Settings2, Trophy, X } from 'lucide-react';
 import './Dashboard.css';
+
+type Tab = 'chart' | 'setup' | 'backtest' | 'leaderboard';
+
+const tabs: Array<{ id: Tab; label: string; icon: typeof BarChart3 }> = [
+  { id: 'chart', label: 'CHART', icon: BarChart3 },
+  { id: 'setup', label: 'SETUPS', icon: Settings2 },
+  { id: 'backtest', label: 'BACKTEST', icon: PlayCircle },
+  { id: 'leaderboard', label: 'LEADERBOARD', icon: Trophy },
+];
 
 export default function Dashboard() {
   const { user, logout } = useAuthStore();
   const { connect, disconnect, subscribeSymbol, prices } = useSocketStore();
   const navigate = useNavigate();
-
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [watchlist, setWatchlist] = useState<any[]>([]);
   const [activeSymbol, setActiveSymbol] = useState('BINANCE:BTCUSDT');
-  const [activeTab, setActiveTab] = useState<'chart' | 'setup' | 'backtest' | 'leaderboard'>('chart');
+  const [activeTab, setActiveTab] = useState<Tab>('chart');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  const liveTick = prices[activeSymbol];
+  const displaySymbol = activeSymbol.replace('BINANCE:', '');
+  
+  // Data Flash effect
+  const priceRef = useRef<HTMLSpanElement>(null);
+  const prevPrice = useRef(liveTick?.price);
+  
+  useEffect(() => {
+    if (liveTick?.price !== prevPrice.current && priceRef.current) {
+      priceRef.current.classList.remove('data-flash');
+      void priceRef.current.offsetWidth; // trigger reflow
+      priceRef.current.classList.add('data-flash');
+      prevPrice.current = liveTick?.price;
+    }
+  }, [liveTick?.price]);
 
   useEffect(() => {
     connect();
     fetchWatchlist();
     subscribeSymbol(activeSymbol);
-    
-    return () => {
-      disconnect();
-    };
+    return () => disconnect();
   }, []);
 
   useEffect(() => {
-    if (activeSymbol) {
-      subscribeSymbol(activeSymbol);
-    }
+    if (activeSymbol) subscribeSymbol(activeSymbol);
   }, [activeSymbol]);
 
   const fetchWatchlist = async () => {
     try {
-      const res = await api.getWatchlist();
-      setWatchlist(res);
-      if (res.length > 0 && activeSymbol === 'BINANCE:BTCUSDT') {
-        setActiveSymbol(res[0].symbol);
-      }
-    } catch (err) {
-      console.error('Failed to fetch watchlist', err);
+      const result = await api.getWatchlist();
+      setWatchlist(result);
+      if (result.length > 0 && activeSymbol === 'BINANCE:BTCUSDT') setActiveSymbol(result[0].symbol);
+    } catch (error) {
+      console.error('Failed to fetch watchlist', error);
     }
   };
 
-  const handleSearch = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const q = e.target.value;
-    setSearchQuery(q);
-    if (q.length > 2) {
-      try {
-        const res = await api.searchSymbol(q);
-        setSearchResults(res.result || []);
-      } catch (err) {
-        console.error('Search error', err);
-      }
-    } else {
+  const handleSearch = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const query = event.target.value;
+    setSearchQuery(query);
+    if (query.trim().length <= 2) {
       setSearchResults([]);
+      return;
+    }
+    try {
+      const result = await api.searchSymbol(query);
+      setSearchResults(result.result || []);
+    } catch (error) {
+      console.error('Search error', error);
     }
   };
 
   const handleAddToWatchlist = async (symbol: string) => {
     try {
       await api.addToWatchlist(symbol);
-      fetchWatchlist();
+      await fetchWatchlist();
       setSearchResults([]);
       setSearchQuery('');
       setActiveSymbol(symbol);
-    } catch (err) {
-      console.error(err);
+      setIsSidebarOpen(false);
+    } catch (error) {
+      console.error('Could not add symbol to watchlist', error);
     }
+  };
+
+  const selectSymbol = (symbol: string) => {
+    setActiveSymbol(symbol);
+    setIsSidebarOpen(false);
+  };
+
+  const selectTab = (tab: Tab) => {
+    setActiveTab(tab);
+    setIsSidebarOpen(false);
   };
 
   const handleLogout = () => {
@@ -82,93 +112,86 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="dashboard-layout">
-      {/* Sidebar / Watchlist */}
-      <aside className="sidebar flex flex-col">
-        <div className="sidebar-header p-4 border-b">
-          <div className="flex items-center gap-2 logo">
-            <Activity className="text-accent" />
-            <h2>Parakh</h2>
-          </div>
+    <div className="blueprint-dashboard">
+      <div className={`sidebar-overlay ${isSidebarOpen ? 'open' : ''}`} onClick={() => setIsSidebarOpen(false)} />
+      
+      <aside className={`blueprint-sidebar ${isSidebarOpen ? 'open' : ''}`}>
+        <div className="blueprint-brand">
+          <span>PARAKH</span>&nbsp;ENGINE
+          <button className="mobile-menu-btn" style={{ marginLeft: 'auto', display: isSidebarOpen ? 'block' : 'none' }} onClick={() => setIsSidebarOpen(false)}>
+            <X size={20} />
+          </button>
         </div>
         
-        <div className="search-container p-4 border-b">
-          <div className="search-input-wrapper">
-            <Search size={16} className="search-icon" />
-            <input 
-              type="text" 
-              placeholder="Search symbols..." 
-              value={searchQuery}
-              onChange={handleSearch}
-            />
-          </div>
+        <div className="blueprint-search">
+          <input type="search" placeholder="SEARCH TICKER..." value={searchQuery} onChange={handleSearch} />
           {searchResults.length > 0 && (
-            <div className="search-results">
-              {searchResults.slice(0, 5).map(result => (
-                <div 
-                  key={result.symbol} 
-                  className="search-item"
-                  onClick={() => handleAddToWatchlist(result.symbol)}
-                >
-                  <span className="symbol">{result.symbol}</span>
-                  <span className="name">{result.description}</span>
+            <div className="search-results" style={{ position: 'absolute', zIndex: 100, background: 'var(--bg-panel)', border: '1px solid var(--border-grid)', width: '240px', marginTop: '4px' }}>
+              {searchResults.slice(0, 5).map((result) => (
+                <div key={result.symbol} className="blueprint-list-item" onClick={() => handleAddToWatchlist(result.symbol)}>
+                  <span className="blueprint-symbol">{result.symbol}</span>
+                  <Plus size={16} color="var(--text-muted)" />
                 </div>
               ))}
             </div>
           )}
         </div>
-
-        <div className="watchlist-container flex-1 overflow-y-auto">
-          <h3 className="section-title p-4">Watchlist</h3>
-          <div className="watchlist">
-            {watchlist.map(item => {
-              const tick = prices[item.symbol];
-              return (
-                <div 
-                  key={item.symbol} 
-                  className={`watchlist-item flex justify-between p-4 ${activeSymbol === item.symbol ? 'active' : ''}`}
-                  onClick={() => setActiveSymbol(item.symbol)}
-                >
-                  <span className="symbol">{item.symbol}</span>
-                  <span className={`price ${tick ? 'flash' : ''}`}>
-                    {tick ? tick.price.toFixed(2) : '-'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+        
+        <div className="blueprint-list">
+          {watchlist.map((item) => {
+            const tick = prices[item.symbol];
+            return (
+              <div key={item.symbol} className={`blueprint-list-item ${activeSymbol === item.symbol ? 'active' : ''}`} onClick={() => selectSymbol(item.symbol)}>
+                <span className="blueprint-symbol">{item.symbol.replace('BINANCE:', '')}</span>
+                <span className="blueprint-price">{tick ? `$${tick.price.toFixed(2)}` : '—'}</span>
+              </div>
+            );
+          })}
+          {watchlist.length === 0 && (
+            <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              No symbols in watchlist.
+            </div>
+          )}
         </div>
-
-        <div className="user-profile p-4 border-t flex justify-between items-center">
-          <span className="truncate">{user?.name || user?.email}</span>
-          <button onClick={handleLogout} className="icon-btn" title="Logout">
-            <LogOut size={18} />
+        
+        <div className="blueprint-user">
+          <div className="blueprint-user-info">
+            <span className="blueprint-user-name">{user?.name || 'OPERATOR'}</span>
+            <span className="blueprint-user-email">{user?.email || 'SYS.ADMIN'}</span>
+          </div>
+          <button className="blueprint-logout" onClick={handleLogout} aria-label="Sign out">
+            <LogOut size={16} />
           </button>
         </div>
       </aside>
-
-      {/* Main Content */}
-      <main className="main-content flex flex-col">
-        <header className="topbar p-4 border-b flex justify-between items-center bg-gray-900">
-          <div className="active-symbol-info flex items-center gap-4">
-            <h1 className="text-xl font-bold">{activeSymbol}</h1>
-            {prices[activeSymbol] && (
-              <span className="live-price text-accent font-mono">${prices[activeSymbol].price.toFixed(2)}</span>
-            )}
+      
+      <main className="blueprint-main">
+        <header className="blueprint-header">
+          <div className="blueprint-ticker">
+            <button className="mobile-menu-btn" onClick={() => setIsSidebarOpen(true)}>
+              <Menu size={20} />
+            </button>
+            <h2>{displaySymbol}</h2>
+            <span className="blueprint-live-price" ref={priceRef}>
+              {liveTick ? `$${liveTick.price.toFixed(2)}` : 'CONNECTING...'}
+            </span>
           </div>
-          <div className="tabs flex gap-2">
-            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'chart' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('chart')}><BarChart2 size={16}/> Chart</button>
-            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'setup' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('setup')}><Settings size={16}/> Setups</button>
-            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'backtest' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('backtest')}><PlayCircle size={16}/> Backtest</button>
-            <button className={`flex items-center gap-2 px-4 py-2 rounded transition ${activeTab === 'leaderboard' ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`} onClick={() => setActiveTab('leaderboard')}><Trophy size={16}/> Leaderboard</button>
-          </div>
+          
+          <nav className="blueprint-tabs">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button key={id} className={`blueprint-tab ${activeTab === id ? 'active' : ''}`} onClick={() => selectTab(id)}>
+                <Icon size={16} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
         </header>
         
-        <div className="content-area flex-1 relative bg-gray-900 overflow-hidden">
-           {activeTab === 'chart' && <Chart symbol={activeSymbol} />}
-           {activeTab === 'setup' && <SetupBuilder />}
-           {activeTab === 'backtest' && <BacktestDashboard activeSymbol={activeSymbol} />}
-           {activeTab === 'leaderboard' && <Leaderboard />}
+        <div className="blueprint-content">
+          {activeTab === 'chart' && <Chart symbol={activeSymbol} />}
+          {activeTab === 'setup' && <SetupBuilder />}
+          {activeTab === 'backtest' && <BacktestDashboard activeSymbol={activeSymbol} />}
+          {activeTab === 'leaderboard' && <Leaderboard />}
         </div>
       </main>
     </div>

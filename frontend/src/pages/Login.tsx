@@ -13,7 +13,6 @@ export default function Login() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const navigate = useNavigate();
 
-  // Auto-redirect if already logged in
   useEffect(() => {
     if (isAuthenticated) {
       navigate('/', { replace: true });
@@ -32,37 +31,50 @@ export default function Login() {
   };
 
   return (
-    <div className="auth-container flex items-center justify-center w-full h-full">
-      <div className="auth-card flex flex-col gap-4 p-4">
-        <h2>Welcome Back</h2>
-        <p className="subtitle">Sign in to your Parakh account</p>
-        
-        {error && <div className="error-banner">{error}</div>}
-        
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <input
-            type="email"
-            placeholder="Email Address"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button type="submit">Sign In</button>
-        </form>
-        
-        {ENABLE_SIGNUP && (
-          <p className="switch-link">
-            Don't have an account? <Link to="/register">Create one</Link>
-          </p>
-        )}
+    <div className="blueprint-auth-layout">
+      
+      <div className="blueprint-auth-hero">
+        <div className="blueprint-auth-hero-content">
+          <h1>Parakh Engine</h1>
+          <p>Enterprise-grade algorithmic trading and backtesting platform. Connect, analyze, and automate.</p>
+        </div>
       </div>
+
+      <div className="blueprint-auth-sidebar">
+        <div className="blueprint-auth-card">
+          <div>
+            <h2>Sign In</h2>
+            <p className="subtitle">Access your workspace</p>
+          </div>
+          
+          {error && <div className="error-banner">{error}</div>}
+          
+          <form onSubmit={handleSubmit}>
+            <input
+              type="email"
+              placeholder="EMAIL_ADDRESS"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="PASSWORD"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <button type="submit">Initialize Session</button>
+          </form>
+          
+          {ENABLE_SIGNUP && (
+            <p className="switch-link">
+              NO_ACCOUNT_FOUND? <Link to="/register">REGISTER_NEW_USER</Link>
+            </p>
+          )}
+        </div>
+      </div>
+      
     </div>
   );
 }

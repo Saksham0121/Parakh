@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
-import './SetupBuilder.css';
 
 export default function SetupBuilder() {
   const [setups, setSetups] = useState<any[]>([]);
@@ -10,108 +10,38 @@ export default function SetupBuilder() {
   const [fundMode, setFundMode] = useState('required_for_signal');
   const [orderRule] = useState({ stopLossPct: 5, takeProfitPct: 15 });
 
-  useEffect(() => {
-    fetchSetups();
-  }, []);
-
   const fetchSetups = async () => {
-    try {
-      const res = await api.getSetups();
-      setSetups(res);
-    } catch (err) {
-      console.error(err);
-    }
+    try { setSetups(await api.getSetups()); } catch (error) { console.error(error); }
   };
+  useEffect(() => { fetchSetups(); }, []);
 
   const handleCreate = async () => {
     try {
-      await api.createSetup({
-        name,
-        technicalConditions: techCond,
-        fundamentalConditions: fundCond,
-        fundamentalMode: fundMode,
-        orderRule
-      });
-      fetchSetups();
+      await api.createSetup({ name, technicalConditions: techCond, fundamentalConditions: fundCond, fundamentalMode: fundMode, orderRule });
+      await fetchSetups();
       setName('');
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (error) { console.error(error); }
   };
-
   const handleDelete = async (id: string) => {
-    try {
-      await api.deleteSetup(id);
-      fetchSetups();
-    } catch (err) {
-      console.error(err);
-    }
+    try { await api.deleteSetup(id); await fetchSetups(); } catch (error) { console.error(error); }
   };
 
-  return (
-    <div className="setup-builder p-6 text-white h-full overflow-y-auto">
-      <h2 className="text-2xl mb-6">Setup Builder</h2>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="card bg-gray-800 p-6 rounded-lg">
-          <h3 className="text-xl mb-4 text-accent">Create New Setup</h3>
-          
-          <div className="mb-4">
-            <label className="block mb-2 text-sm text-gray-400">Setup Name</label>
-            <input 
-              className="w-full bg-gray-700 p-2 rounded text-white border border-gray-600 focus:border-accent"
-              type="text" 
-              value={name} 
-              onChange={e => setName(e.target.value)} 
-              placeholder="e.g. RSI Oversold + Value Play" 
-            />
-          </div>
-
-          <div className="mb-4">
-            <label className="block mb-2 text-sm text-gray-400">Fundamental Mode</label>
-            <select 
-              className="w-full bg-gray-700 p-2 rounded text-white border border-gray-600 focus:border-accent"
-              value={fundMode} 
-              onChange={e => setFundMode(e.target.value)}
-            >
-              <option value="display_only">Display Only</option>
-              <option value="required_for_signal">Required for Signal</option>
-            </select>
-          </div>
-
-          <button 
-            className="w-full bg-accent text-white p-2 rounded hover:bg-opacity-90 transition mt-4 font-bold"
-            onClick={handleCreate}
-            disabled={!name}
-          >
-            Create Setup
-          </button>
-        </div>
-
-        <div className="card bg-gray-800 p-6 rounded-lg">
-          <h3 className="text-xl mb-4 text-accent">Your Setups</h3>
-          {setups.length === 0 ? (
-            <p className="text-gray-400">No setups created yet.</p>
-          ) : (
-            <ul className="space-y-3">
-              {setups.map(s => (
-                <li key={s.id} className="bg-gray-700 p-3 rounded flex justify-between items-center">
-                  <div>
-                    <strong className="block">{s.name}</strong>
-                    <span className="text-xs text-gray-400">{s.fundamentalMode}</span>
-                  </div>
-                  <button 
-                    onClick={() => handleDelete(s.id)}
-                    className="text-red-400 hover:text-red-300"
-                  >
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+  return <div className="workspace-scroll setup-builder">
+    <header className="workspace-heading"><span className="workspace-kicker">Strategy library</span><h2>Build a setup</h2><p>Turn a repeatable market read into a testable rule.</p></header>
+    <div className="setup-grid">
+      <section className="workspace-card">
+        <div className="card-heading"><span>Create</span><small>New rule set</small></div>
+        <label className="form-field"><span>Setup name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. RSI mean reversion" /></label>
+        <label className="form-field"><span>Fundamental filter</span><select value={fundMode} onChange={(event) => setFundMode(event.target.value)}><option value="display_only">Display only</option><option value="required_for_signal">Required for signal</option></select></label>
+        <div className="rule-preview"><span>Default signal</span><strong>RSI (14) &gt; 70</strong><small>Stop loss 5% · Take profit 15%</small></div>
+        <button className="primary-action" onClick={handleCreate} disabled={!name}><Plus size={16} />Create setup</button>
+      </section>
+      <section className="workspace-card setup-list-card">
+        <div className="card-heading"><span>Your setups</span><small>{setups.length} saved</small></div>
+        {setups.length === 0 ? <div className="empty-card"><span>No setups saved</span><p>Create your first rule set to compare it against market history.</p></div> : <ul className="setup-list">
+          {setups.map((setup) => <li key={setup.id}><div><strong>{setup.name}</strong><span>{setup.fundamentalMode === 'required_for_signal' ? 'Fundamentals required' : 'Fundamentals shown'}</span></div><button onClick={() => handleDelete(setup.id)} aria-label={`Delete ${setup.name}`}><Trash2 size={16} /></button></li>)}
+        </ul>}
+      </section>
     </div>
-  );
+  </div>;
 }
