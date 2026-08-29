@@ -140,20 +140,47 @@ export class YahooFinanceService implements OnModuleInit {
   }
 
   /**
-   * Search symbols via Yahoo Finance
+   * Search symbols via Yahoo Finance (prioritizing .NS Indian stocks)
    */
   async searchSymbol(query: string): Promise<any> {
     try {
-      const searchRes = await this.yf.search(query);
+      const qClean = query.trim();
+      const searchRes = await this.yf.search(qClean);
       const quotes = searchRes?.quotes || [];
       const results = quotes
-        .filter((item: any) => item.symbol && item.shortname)
+        .filter((item: any) => item.symbol)
         .map((item: any) => ({
           description: item.shortname || item.longname || item.symbol,
           displaySymbol: item.symbol,
           symbol: item.symbol,
           type: item.quoteType || 'Common Stock',
-        }));
+          exchange: item.exchange || '',
+        }))
+        .sort((a: any, b: any) => {
+          // Indian stocks (.NS or .BO or NSE/BSE exchange) appear on top
+          const aIsIndian = a.symbol.endsWith('.NS') || a.symbol.endsWith('.BO') || a.exchange === 'NSI' || a.exchange === 'BSE';
+          const bIsIndian = b.symbol.endsWith('.NS') || b.symbol.endsWith('.BO') || b.exchange === 'NSI' || b.exchange === 'BSE';
+          if (aIsIndian && !bIsIndian) return -1;
+          if (!aIsIndian && bIsIndian) return 1;
+          return 0;
+        });
+
+      // If user typed a symbol that doesn't end with .NS, check if .NS variant exists and prepend it
+      const upper = qClean.toUpperCase();
+      if (!upper.includes('.') && !results.some((r: any) => r.symbol === `${upper}.NS`)) {
+        try {
+          const nsQuote = await this.yf.quote(`${upper}.NS`).catch(() => null);
+          if (nsQuote && nsQuote.symbol) {
+            results.unshift({
+              description: nsQuote.shortName || nsQuote.longName || `${upper} (NSE India)`,
+              displaySymbol: `${upper}.NS`,
+              symbol: `${upper}.NS`,
+              type: 'EQUITY',
+              exchange: 'NSI',
+            });
+          }
+        } catch (_) {}
+      }
 
       return { count: results.length, result: results };
     } catch (err: any) {

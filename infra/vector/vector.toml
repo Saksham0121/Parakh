@@ -6,8 +6,8 @@ type = "remap"
 inputs = ["docker"]
 source = '''
   parsed, err = parse_json(.message)
-  if err == null {
-    . = merge(., parsed)
+  if err == null && is_object(parsed) {
+    ., err = merge(., parsed)
   }
 '''
 

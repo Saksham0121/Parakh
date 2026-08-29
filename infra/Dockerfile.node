@@ -1,77 +1,117 @@
-FROM node:22-alpine AS deps
+# ═══════════════════════════════════════════════════════════════════════════
+#  Parakh — Optimised multi-stage Node.js image
+#  Target: one image for all NestJS services in the workspace
+#
+#  Stages
+#  ──────
+#  1. base        → pin Alpine, global env, create non-root user
+#  2. deps        → install ALL deps (dev + prod) for the build
+#  3. builder     → compile TypeScript for common + the target service
+#  4. prod-deps   → prune to production-only dependencies
+#  5. production  → copy only runtime artefacts → smallest possible image
+#
+#  Args
+#  ────
+#  SERVICE_NAME   (required) e.g. user-service, api-gateway, …
+#  HAS_PRISMA     set to "true" for services that use @prisma/client
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── Stage 1: base ──────────────────────────────────────────────────────────
+FROM node:22-alpine AS base
+
+# Security: run as non-root in production
+RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
+
+# Node options shared by all later stages
+ENV NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=512"
+
+
+# ─── Stage 2: deps (all deps — needed for compilation) ─────────────────────
+FROM base AS deps
 WORKDIR /app
 
-# Copy root workspace config
-COPY package.json ./
+# Copy lock files first for layer-cache friendliness
+COPY package.json package-lock.json ./
 COPY tsconfig.base.json ./
 
-# Copy package.json of all services to cache npm install globally
-COPY common/package.json ./common/
-COPY api-gateway/package.json ./api-gateway/
-COPY user-service/package.json ./user-service/
-COPY market-data-service/package.json ./market-data-service/
-COPY indicator-service/package.json ./indicator-service/
-COPY setup-service/package.json ./setup-service/
-COPY alert-service/package.json ./alert-service/
-COPY websocket-gateway/package.json ./websocket-gateway/
-COPY fundamentals-service/package.json ./fundamentals-service/
-COPY backtest-service/package.json ./backtest-service/
+# Only the package.json files of services we actually need
+# (keeps npm from downloading workspace packages for services we don't build)
+COPY common/package.json                    ./common/
+COPY api-gateway/package.json               ./api-gateway/
+COPY user-service/package.json              ./user-service/
+COPY market-data-service/package.json       ./market-data-service/
+COPY indicator-service/package.json         ./indicator-service/
+COPY setup-service/package.json             ./setup-service/
+COPY alert-service/package.json             ./alert-service/
+COPY websocket-gateway/package.json         ./websocket-gateway/
+COPY fundamentals-service/package.json      ./fundamentals-service/
+COPY backtest-service/package.json          ./backtest-service/
 
-RUN npm install
+# Install everything (dev + prod) — npm workspaces hoists to /app/node_modules
+# We use npm ci so the lockfile is respected exactly
+RUN npm ci --include=dev
 
+
+# ─── Stage 3: builder (TypeScript compilation) ──────────────────────────────
+FROM deps AS builder
+ARG SERVICE_NAME
+ARG HAS_PRISMA=false
+
+WORKDIR /app
+
+# Build common library first (all services depend on it)
+COPY common ./common
+RUN cd common && npm run build
+
+# Copy Prisma schema; generate client only when HAS_PRISMA=true
+# Always create .prisma dir so the production COPY below succeeds universally
+COPY user-service/prisma ./user-service/prisma
+RUN if [ "$HAS_PRISMA" = "true" ]; then \
+      npx prisma generate --schema=./user-service/prisma/schema.prisma; \
+    fi && \
+    mkdir -p /app/node_modules/.prisma
+
+# Copy only the source of the target service and compile it
+COPY ${SERVICE_NAME} ./${SERVICE_NAME}
+RUN cd ${SERVICE_NAME} && npm run build
+
+
+# ─── Stage 4: prod-deps (strip devDependencies) ────────────────────────────
 FROM deps AS prod-deps
+# Remove everything that is only required for building / testing
 RUN npm prune --omit=dev && npm cache clean --force
 
-FROM deps AS builder
-# Copy common source and build it
-COPY common ./common
-WORKDIR /app/common
-RUN npm run build
 
-# Go back to app root
+# ─── Stage 5: production ────────────────────────────────────────────────────
+FROM base AS production
+ARG SERVICE_NAME
+ARG HAS_PRISMA=false
+ENV SERVICE_NAME=${SERVICE_NAME}
+
 WORKDIR /app
 
-# Copy prisma schema so it can be generated
-COPY user-service/prisma ./user-service/prisma
+# ── Node modules (production-only, hoisted to root) ──
+COPY --from=prod-deps --chown=nestjs:nodejs /app/node_modules ./node_modules
 
-# Copy service source
-ARG SERVICE_NAME
-COPY ${SERVICE_NAME} ./${SERVICE_NAME}
+# ── Prisma runtime client ──
+# builder always has /app/node_modules/.prisma (created above);
+# for non-Prisma services it is empty — zero bytes added.
+COPY --from=builder --chown=nestjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+
+# ── Common library (compiled JS only, no sources) ──
+COPY --from=builder --chown=nestjs:nodejs /app/common/dist      ./common/dist
+COPY --from=builder --chown=nestjs:nodejs /app/common/package.json ./common/
+
+# ── Target service (compiled JS + package.json) ──
+COPY --from=builder --chown=nestjs:nodejs /app/${SERVICE_NAME}/dist       ./${SERVICE_NAME}/dist
+COPY --from=builder --chown=nestjs:nodejs /app/${SERVICE_NAME}/package.json ./${SERVICE_NAME}/
+
+# Drop to non-root for runtime
+USER nestjs
 WORKDIR /app/${SERVICE_NAME}
 
-# Generate prisma (fails gracefully if not a prisma service)
-RUN npx prisma generate --schema=../user-service/prisma/schema.prisma || true
+# Health/liveness — expose the primary port only; Compose handles the rest
+EXPOSE 3000
 
-# Build the service
-RUN npm run build
-
-FROM node:22-alpine AS production
-ARG SERVICE_NAME
-WORKDIR /app
-
-# Copy root pruned node_modules
-COPY --from=prod-deps /app/node_modules ./node_modules
-
-# Copy generated Prisma client from builder (if it exists)
-# Prisma client is stored in node_modules/.prisma and node_modules/@prisma/client
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
-
-# Copy common dist
-COPY --from=builder /app/common/dist ./common/dist
-COPY --from=builder /app/common/package.json ./common/
-
-# Copy service dist and package.json
-COPY --from=builder /app/${SERVICE_NAME}/dist ./${SERVICE_NAME}/dist
-COPY --from=builder /app/${SERVICE_NAME}/package.json ./${SERVICE_NAME}/
-
-# Attempt to copy service specific node_modules if any (npm workspaces usually hoists to root, but binaries might be here)
-# We use a wildcard trick to prevent failing if the directory doesn't exist
-COPY --from=builder /app/${SERVICE_NAME}/package.json /app/${SERVICE_NAME}/node_module[s] ./${SERVICE_NAME}/node_modules/
-
-# Copy prisma generated client (it's inside root node_modules/@prisma/client usually, but just in case)
-# Wait, root node_modules already has it.
-
-WORKDIR /app/${SERVICE_NAME}
-EXPOSE 3000 3001 3002 3003 3004 3005 3006 3007 3008 3009
 CMD ["node", "dist/main.js"]

@@ -1,0 +1,39 @@
+# Root workspace artifacts
+node_modules
+npm-debug.log*
+.git
+.gitignore
+.env*
+!.env.example
+
+# Test and dev artifacts
+coverage
+**/*.test.ts
+**/*.spec.ts
+**/jest.config.*
+
+# Build outputs that we'll produce inside Docker
+**/dist
+**/.tsbuildinfo
+**/tsconfig.tsbuildinfo
+
+# Docs and tooling
+README.md
+*.md
+k6
+scratch
+.claude
+skills-lock.json
+
+# Service-local node_modules (workspace installs hoist to root anyway)
+api-gateway/node_modules
+user-service/node_modules
+market-data-service/node_modules
+indicator-service/node_modules
+setup-service/node_modules
+alert-service/node_modules
+websocket-gateway/node_modules
+fundamentals-service/node_modules
+backtest-service/node_modules
+common/node_modules
+frontend/node_modules

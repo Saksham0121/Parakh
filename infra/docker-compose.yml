@@ -151,6 +151,7 @@ services:
       dockerfile: infra/Dockerfile.node
       args:
         SERVICE_NAME: user-service
+        HAS_PRISMA: "true"
     container_name: parakh-user-service
     restart: unless-stopped
     environment:
@@ -200,6 +201,7 @@ services:
       dockerfile: infra/Dockerfile.node
       args:
         SERVICE_NAME: setup-service
+        HAS_PRISMA: "true"
     container_name: parakh-setup-service
     restart: unless-stopped
     environment:
@@ -217,6 +219,7 @@ services:
       dockerfile: infra/Dockerfile.node
       args:
         SERVICE_NAME: alert-service
+        HAS_PRISMA: "true"
     container_name: parakh-alert-service
     restart: unless-stopped
     environment:
@@ -264,6 +267,7 @@ services:
       dockerfile: infra/Dockerfile.node
       args:
         SERVICE_NAME: fundamentals-service
+        HAS_PRISMA: "true"
     container_name: parakh-fundamentals-service
     restart: unless-stopped
     environment:
@@ -281,6 +285,7 @@ services:
       dockerfile: infra/Dockerfile.node
       args:
         SERVICE_NAME: backtest-service
+        HAS_PRISMA: "true"
     container_name: parakh-backtest-service
     restart: unless-stopped
     environment:
@@ -359,6 +364,7 @@ services:
     image: timberio/vector:latest-alpine
     container_name: parakh-vector
     restart: unless-stopped
+    command: ["--config", "/etc/vector/vector.toml"]
     volumes:
       - ./vector/vector.toml:/etc/vector/vector.toml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

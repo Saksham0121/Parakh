@@ -109,34 +109,6 @@ export class FundamentalsSchedulerService implements OnModuleInit {
     }
   }
 
-      // Mock data if API is not available, circuit opened, or for crypto
-      if (!data) {
-        data = this.generateMockFundamentals(symbol);
-      }
-
-      // Upsert to DB
-      const updated = await this.prisma.companyFundamentals.upsert({
-        where: { symbol },
-        update: {
-          peRatio: data.peRatio,
-          eps: data.eps,
-          roe: data.roe,
-          debtToEquity: data.debtToEquity,
-          marketCap: data.marketCap,
-          sector: data.sector,
-        },
-        create: data,
-      });
-
-      // Cache in Redis for quick access by Alert/Backtest services
-      await this.redis.client.set(`fundamentals:${symbol}`, JSON.stringify(updated));
-
-      logger.info(`Synced fundamentals for ${symbol}`);
-    } catch (err) {
-      logger.error(`Failed to sync fundamentals for ${symbol}`, { error: err });
-    }
-  }
-
   private generateMockFundamentals(symbol: string) {
     // Generate deterministic mock data based on symbol length
     const hash = symbol.split('').reduce((a, b) => a + b.charCodeAt(0), 0);

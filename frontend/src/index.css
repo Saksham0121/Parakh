@@ -1,24 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  /* THE BLUEPRINT DESIGN SYSTEM */
-  --bg-base: #07090C;
-  --bg-panel: #0D1117;
-  --bg-hover: #161B22;
-  --border-grid: #1C2333;
-  --border-strong: #2D3A54;
-  --accent-primary: #2D5BFF;
-  --accent-hover: #1946EB;
+  /* THE MODERN TRADING VIEW / BLUEPRINT DESIGN SYSTEM */
+  --bg-base: #0B0E14;
+  --bg-panel: #121721;
+  --bg-hover: #1A2230;
+  --border-grid: #1E2433;
+  --border-strong: #2A364F;
+  --accent-primary: #2962FF;
+  --accent-hover: #1E4BD8;
   --text-primary: #F0F4F8;
-  --text-muted: #7A8B9E;
+  --text-muted: #787B86;
   --text-subtle: #4D5A6B;
   
-  --signal-long: #00E676;
-  --signal-long-dim: rgba(0, 230, 118, 0.15);
-  --signal-short: #FF3B30;
-  --signal-short-dim: rgba(255, 59, 48, 0.15);
+  --signal-long: #089981;
+  --signal-long-dim: rgba(8, 153, 129, 0.15);
+  --signal-short: #F23645;
+  --signal-short-dim: rgba(242, 54, 69, 0.15);
   
-  --font-ui: 'Manrope', system-ui, sans-serif;
+  --font-ui: 'Inter', 'Manrope', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   
   font-family: var(--font-ui);
@@ -33,7 +33,6 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  border-radius: 0 !important; /* The Blueprint dictates absolute sharpness */
 }
 
 html, body, #root {
@@ -45,10 +44,10 @@ html, body, #root {
 body {
   min-height: 100dvh;
   background: var(--bg-base);
-  /* The Mathematical Grid Background */
+  /* The Mathematical Trading Grid Background */
   background-image: 
-    linear-gradient(var(--border-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border-grid) 1px, transparent 1px);
+    linear-gradient(rgba(30, 36, 51, 0.45) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 36, 51, 0.45) 1px, transparent 1px);
   background-size: 40px 40px;
   background-position: center center;
   background-attachment: fixed;
@@ -63,8 +62,7 @@ button, input, select {
 
 button {
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  border: 1px solid var(--border-strong);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 button:hover {
@@ -73,44 +71,61 @@ button:hover {
 }
 
 button:active {
-  transform: translateY(1px);
+  transform: scale(0.98);
 }
 
 button:focus-visible, input:focus-visible, select:focus-visible {
   outline: 1px solid var(--accent-primary);
-  outline-offset: 2px;
+  outline-offset: 1px;
   border-color: var(--accent-primary);
 }
 
 input, select {
   outline: 0;
   padding: 8px 12px;
-  transition: border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 input:focus, select:focus {
   border-color: var(--accent-primary);
 }
 
-/* Data Flash Animation for WebSockets */
+/* Animations */
 @keyframes dataFlash {
-  0% { color: #FFF; text-shadow: 0 0 8px rgba(255,255,255,0.8); }
+  0% { color: #FFF; text-shadow: 0 0 12px rgba(41, 98, 255, 0.9); }
   100% { color: inherit; text-shadow: none; }
 }
+
+@keyframes dropdownSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-dropdown {
+  animation: dropdownSlide 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 .data-flash {
   animation: dataFlash 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 ::selection {
-  background: rgba(45, 91, 255, 0.38);
+  background: rgba(41, 98, 255, 0.4);
   color: white;
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { 
-  background: var(--border-strong); 
+  background: #1E2433; 
+  border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover { 
-  background: var(--text-muted); 
+  background: #2A364F; 
 }

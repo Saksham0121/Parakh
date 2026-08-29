@@ -7,47 +7,61 @@ export class WatchlistService {
   constructor(private prisma: PrismaService) {}
 
   async getWatchlist(userId: string) {
-    return this.prisma.watchlist.findMany({
+    const list = await this.prisma.watchlist.findMany({
       where: { userId },
       orderBy: { symbol: 'asc' },
     });
+
+    // If user is brand new with an empty watchlist, initialize starter symbols
+    if (list.length === 0) {
+      const defaultSymbols = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'AAPL', 'NVDA'];
+      await this.prisma.watchlist.createMany({
+        data: defaultSymbols.map((symbol) => ({
+          userId,
+          symbol,
+        })),
+        skipDuplicates: true,
+      });
+
+      return this.prisma.watchlist.findMany({
+        where: { userId },
+        orderBy: { symbol: 'asc' },
+      });
+    }
+
+    return list;
   }
 
   async addSymbol(userId: string, dto: AddWatchlistDto) {
-    // Check for duplicate
+    const symbol = dto.symbol.toUpperCase();
+    // Check for duplicate for this specific user
     const existing = await this.prisma.watchlist.findUnique({
-      where: {
-        userId_symbol: { userId, symbol: dto.symbol },
-      },
-    });
-
-    if (existing) {
-      throw new ConflictException(`${dto.symbol} is already in your watchlist`);
-    }
-
-    return this.prisma.watchlist.create({
-      data: {
-        userId,
-        symbol: dto.symbol,
-      },
-    });
-  }
-
-  async removeSymbol(userId: string, symbol: string) {
-    const item = await this.prisma.watchlist.findUnique({
       where: {
         userId_symbol: { userId, symbol },
       },
     });
 
-    if (!item) {
-      throw new NotFoundException(`${symbol} is not in your watchlist`);
+    if (existing) {
+      return existing;
     }
 
-    await this.prisma.watchlist.delete({
-      where: { id: item.id },
+    return this.prisma.watchlist.create({
+      data: {
+        userId,
+        symbol,
+      },
+    });
+  }
+
+  async removeSymbol(userId: string, symbol: string) {
+    const norm = symbol.toUpperCase();
+    await this.prisma.watchlist.deleteMany({
+      where: {
+        userId,
+        symbol: norm,
+      },
     });
 
-    return { message: `${symbol} removed from watchlist` };
+    return { message: `${norm} removed from watchlist` };
   }
 }

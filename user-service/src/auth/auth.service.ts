@@ -32,6 +32,16 @@ export class AuthService {
       },
     });
 
+    // Seed starter watchlist for the new user in database
+    const defaultSymbols = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'AAPL', 'NVDA'];
+    await this.prisma.watchlist.createMany({
+      data: defaultSymbols.map((symbol) => ({
+        userId: user.id,
+        symbol,
+      })),
+      skipDuplicates: true,
+    });
+
     // Generate token
     const token = this.generateToken(user.id, user.email);
 
