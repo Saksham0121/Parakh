@@ -15,4 +15,8 @@ source = '''
 type = "http"
 inputs = ["parse_logs"]
 uri = "http://victoria-logs:9428/insert/jsonline?_stream_fields=container_name,stream"
+# VictoriaLogs /insert/jsonline requires NDJSON (one JSON object per line, no array wrapper).
+# encoding.codec="json" emits each event as a JSON object.
+# framing.method="newline_delimited" separates them with newlines instead of wrapping in [].
 encoding.codec = "json"
+framing.method = "newline_delimited"

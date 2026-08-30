@@ -44,7 +44,11 @@ export const api = {
   searchSymbol: (query: string) => fetchWithAuth(`/market/search?q=${query}`),
 
   getSetups: () => fetchWithAuth('/setups'),
+  getSetup: (id: string) => fetchWithAuth(`/setups/${id}`),
   createSetup: (data: any) => fetchWithAuth('/setups', { method: 'POST', body: JSON.stringify(data) }),
+  updateSetup: (id: string, data: any) => fetchWithAuth(`/setups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  toggleSetupActive: (id: string) => fetchWithAuth(`/setups/${id}/activate`, { method: 'PATCH' }),
+  duplicateSetup: (id: string) => fetchWithAuth(`/setups/${id}/duplicate`, { method: 'POST' }),
   deleteSetup: (id: string) => fetchWithAuth(`/setups/${id}`, { method: 'DELETE' }),
 
   runBacktest: (data: any) => fetchWithAuth('/backtests', { method: 'POST', body: JSON.stringify(data) }),

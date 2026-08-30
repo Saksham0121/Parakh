@@ -16,7 +16,16 @@ export class AlertConsumerService implements OnModuleInit, OnModuleDestroy {
     
     const host = this.configService.get<string>('REDIS_HOST', 'localhost');
     const port = this.configService.get<number>('REDIS_PORT', 6379);
-    this.redisClient = new Redis({ host, port });
+    this.redisClient = new Redis({
+      host,
+      port,
+      lazyConnect: true,         // Don't connect in constructor — wait until first use
+      retryStrategy: (times) => Math.min(times * 500, 5000), // backoff, max 5s
+    });
+    // Suppress "Unhandled error event" — log cleanly instead
+    this.redisClient.on('error', (err) => {
+      logger.warn('Redis connection error', { error: err.message });
+    });
   }
 
   async onModuleInit() {

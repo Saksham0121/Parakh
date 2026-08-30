@@ -185,6 +185,9 @@ export default function Chart({ symbol }: ChartProps) {
   const [isInDrawingMode, setIsInDrawingMode] = useState(false);
   const activeOverlayIdRef = useRef<string | null>(null);
 
+  // Track currently selected drawing overlay for independent editing/deletion
+  const [selectedOverlay, setSelectedOverlay] = useState<{ id: string; name: string } | null>(null);
+
   // Hovered / Live OHLC legend data
   const [ohlc, setOhlc] = useState<{
     open?: number;
@@ -254,16 +257,29 @@ export default function Chart({ symbol }: ChartProps) {
     };
   }, [isDraggingPalette]);
 
-  // Escape key cancels active drawing mode
+  // Escape key cancels active drawing mode or deselects
+  // Delete / Backspace keys remove the currently selected overlay
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isInDrawingMode) {
-        exitDrawingMode();
+      // Don't intercept when user is typing in an input or textarea
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (isInDrawingMode) {
+          exitDrawingMode();
+        } else if (selectedOverlay) {
+          setSelectedOverlay(null);
+        }
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedOverlay && chartInstance.current) {
+        chartInstance.current.removeOverlay({ id: selectedOverlay.id });
+        setSelectedOverlay(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isInDrawingMode]);
+  }, [isInDrawingMode, selectedOverlay]);
 
   const handlePaletteMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -615,21 +631,45 @@ export default function Chart({ symbol }: ChartProps) {
         line: lineStyle,
         ...rectStyle,
       },
+      // When user clicks to select this shape
+      onSelected: (event) => {
+        if (event.overlay) {
+          setSelectedOverlay({ id: event.overlay.id, name: event.overlay.name || overlayName });
+        }
+        return true;
+      },
+      // When user clicks outside or deselects this shape
+      onDeselected: () => {
+        setSelectedOverlay(null);
+        return true;
+      },
+      // Right-click instantly deletes this specific shape
+      onRightClick: (event) => {
+        if (event.overlay && chartInstance.current) {
+          chartInstance.current.removeOverlay({ id: event.overlay.id });
+          setSelectedOverlay(null);
+        }
+        return true;
+      },
       // ↓ klinecharts calls this once the user finishes placing all required points
-      onDrawEnd: () => {
-        // Drawing complete — revert to cursor just like TradingView
+      onDrawEnd: (event) => {
+        // Drawing complete — select the newly placed shape & revert tool to cursor
+        if (event.overlay) {
+          setSelectedOverlay({ id: event.overlay.id, name: event.overlay.name || overlayName });
+        }
         setActiveDrawing('cursor');
         setIsInDrawingMode(false);
         activeOverlayIdRef.current = null;
         return true;
       },
-      // ↓ Called when overlay is removed (e.g. right-click → delete)
-      onRemoved: () => {
-        if (activeOverlayIdRef.current) {
+      // ↓ Called when overlay is removed
+      onRemoved: (event) => {
+        if (activeOverlayIdRef.current === event.overlay?.id) {
           activeOverlayIdRef.current = null;
           setActiveDrawing('cursor');
           setIsInDrawingMode(false);
         }
+        setSelectedOverlay((prev) => (prev?.id === event.overlay?.id ? null : prev));
         return true;
       },
     };
@@ -643,11 +683,21 @@ export default function Chart({ symbol }: ChartProps) {
     }
   };
 
+  // Delete only the currently selected overlay
+  const handleDeleteSelectedOverlay = () => {
+    if (selectedOverlay && chartInstance.current) {
+      chartInstance.current.removeOverlay({ id: selectedOverlay.id });
+      setSelectedOverlay(null);
+    }
+  };
+
   // Clear all drawings
   const handleClearDrawings = () => {
     if (chartInstance.current) {
       chartInstance.current.removeOverlay();
       setActiveDrawing('cursor');
+      setIsInDrawingMode(false);
+      setSelectedOverlay(null);
     }
   };
 
@@ -689,6 +739,27 @@ export default function Chart({ symbol }: ChartProps) {
         if (lows[i] < lowest) lowest = lows[i];
       }
 
+      // Common callbacks for Auto S/R shapes
+      const autoSRCallbacks = {
+        onSelected: (event: any) => {
+          if (event.overlay) {
+            setSelectedOverlay({ id: event.overlay.id, name: event.overlay.name });
+          }
+          return true;
+        },
+        onDeselected: () => {
+          setSelectedOverlay(null);
+          return true;
+        },
+        onRightClick: (event: any) => {
+          if (event.overlay && chartInstance.current) {
+            chartInstance.current.removeOverlay({ id: event.overlay.id });
+            setSelectedOverlay(null);
+          }
+          return true;
+        },
+      };
+
       // Resistance Level
       chartInstance.current.createOverlay({
         name: 'horizontalStraightLine',
@@ -696,6 +767,7 @@ export default function Chart({ symbol }: ChartProps) {
         styles: {
           line: { color: '#F23645', size: 2, style: LineType.Dashed, dashedValue: [6, 4] },
         },
+        ...autoSRCallbacks,
       });
 
       // Support Level
@@ -705,6 +777,7 @@ export default function Chart({ symbol }: ChartProps) {
         styles: {
           line: { color: '#089981', size: 2, style: LineType.Dashed, dashedValue: [6, 4] },
         },
+        ...autoSRCallbacks,
       });
 
       // Consolidation Breakout Box
@@ -727,6 +800,7 @@ export default function Chart({ symbol }: ChartProps) {
             borderSize: 2,
           },
         },
+        ...autoSRCallbacks,
       });
     } catch (err) {
       console.error('Auto S/R calculation error', err);
@@ -1271,6 +1345,40 @@ export default function Chart({ symbol }: ChartProps) {
                 <span className="text-[#787B86]">— Click chart to place points</span>
                 <button onClick={exitDrawingMode} className="ml-1 flex items-center gap-1 text-[#787B86] hover:text-white border border-[#242C3D] rounded px-1.5 py-0.5">
                   <X size={11} /><span className="text-[10px]">Esc</span>
+                </button>
+              </div>
+            )}
+
+            {/* 🎯 Contextual Floating Toolbar for Selected Drawing */}
+            {selectedOverlay && !isInDrawingMode && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center bg-[#121721]/95 backdrop-blur-xl border border-[#2962FF]/60 shadow-2xl rounded-lg px-3 py-1.5 gap-2.5 z-30 animate-dropdown ring-1 ring-[#2962FF]/30">
+                <div className="flex items-center gap-1.5 text-xs font-mono text-[#F0F4F8]">
+                  <span className="w-2 h-2 rounded-full bg-[#00E676] animate-pulse" />
+                  <span className="font-semibold uppercase tracking-wide">
+                    {selectedOverlay.name.replace(/([A-Z])/g, ' $1').trim()}
+                  </span>
+                  <span className="text-[10px] text-[#787B86] ml-1 hidden sm:inline">SELECTED</span>
+                </div>
+
+                <div className="w-[1px] h-4 bg-[#242C3D]" />
+
+                {/* Quick Delete Button for This Specific Selected Overlay */}
+                <button
+                  onClick={handleDeleteSelectedOverlay}
+                  title="Delete Selected Drawing (Del / Backspace)"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#F23645]/15 hover:bg-[#F23645]/25 text-[#F23645] border border-[#F23645]/40 text-xs font-semibold transition-all hover:scale-105 cursor-pointer"
+                >
+                  <Trash2 size={13} />
+                  <span>Delete Shape</span>
+                </button>
+
+                {/* Deselect / Close */}
+                <button
+                  onClick={() => setSelectedOverlay(null)}
+                  title="Deselect (Esc)"
+                  className="p-1 rounded text-[#787B86] hover:text-white hover:bg-[#1A2230] transition-colors ml-0.5 cursor-pointer"
+                >
+                  <X size={13} />
                 </button>
               </div>
             )}

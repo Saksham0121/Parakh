@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Req, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Req, UnauthorizedException } from '@nestjs/common';
 import { SetupService } from './setup.service';
 import { Request } from 'express';
 
@@ -22,9 +22,24 @@ export class SetupController {
     return this.setupService.getUserSetups(this.getUserId(req));
   }
 
-  @Put(':id')
+  @Get(':id')
+  async findOne(@Req() req: Request, @Param('id') id: string) {
+    return this.setupService.getSetup(this.getUserId(req), id);
+  }
+
+  @Patch(':id')
   async update(@Req() req: Request, @Param('id') id: string, @Body() data: any) {
     return this.setupService.updateSetup(this.getUserId(req), id, data);
+  }
+
+  @Patch(':id/activate')
+  async toggleActive(@Req() req: Request, @Param('id') id: string) {
+    return this.setupService.toggleActive(this.getUserId(req), id);
+  }
+
+  @Post(':id/duplicate')
+  async duplicate(@Req() req: Request, @Param('id') id: string) {
+    return this.setupService.duplicateSetup(this.getUserId(req), id);
   }
 
   @Delete(':id')
