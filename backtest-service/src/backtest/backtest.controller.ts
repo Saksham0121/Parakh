@@ -23,13 +23,29 @@ export class BacktestController {
     );
   }
 
-  @Get(':runId')
-  async getRun(@Req() req: Request, @Param('runId') runId: string) {
-    return this.backtestService.getBacktestRun(this.getUserId(req), runId);
-  }
-
   @Get('leaderboard/top')
   async getLeaderboard() {
     return this.backtestService.getSetupRankings();
   }
+
+  @Get('setup/:setupId')
+  async getSetupBacktests(@Param('setupId') setupId: string) {
+    return this.backtestService.getSetupBacktests(setupId);
+  }
+
+  @Get(':runId/status')
+  async getStatus(@Req() req: Request, @Param('runId') runId: string) {
+    return this.backtestService.getStatus(this.getUserId(req), runId);
+  }
+
+  @Get(':runId/playback')
+  async getPlayback(@Req() req: Request, @Param('runId') runId: string) {
+    return this.backtestService.getPlayback(this.getUserId(req), runId);
+  }
+
+  @Get(':runId')
+  async getRun(@Req() req: Request, @Param('runId') runId: string) {
+    return this.backtestService.getBacktestRun(this.getUserId(req), runId);
+  }
 }
+

@@ -107,8 +107,36 @@ input:focus, select:focus {
   }
 }
 
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes softGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(41, 98, 255, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(41, 98, 255, 0.45);
+  }
+}
+
 .animate-dropdown {
   animation: dropdownSlide 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-in {
+  animation: fadeInScale 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-glow {
+  animation: softGlow 3s ease-in-out infinite;
 }
 
 .data-flash {
@@ -129,3 +157,4 @@ input:focus, select:focus {
 ::-webkit-scrollbar-thumb:hover { 
   background: #2A364F; 
 }
+

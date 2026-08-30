@@ -52,6 +52,10 @@ export const api = {
   deleteSetup: (id: string) => fetchWithAuth(`/setups/${id}`, { method: 'DELETE' }),
 
   runBacktest: (data: any) => fetchWithAuth('/backtests', { method: 'POST', body: JSON.stringify(data) }),
+  getBacktestStatus: (runId: string) => fetchWithAuth(`/backtests/${runId}/status`),
+  getBacktestPlayback: (runId: string) => fetchWithAuth(`/backtests/${runId}/playback`),
   getBacktestRun: (runId: string) => fetchWithAuth(`/backtests/${runId}`),
+  getSetupBacktests: (setupId: string) => fetchWithAuth(`/backtests/setup/${setupId}`),
   getLeaderboard: () => fetchWithAuth('/backtests/leaderboard/top'),
 };
+
