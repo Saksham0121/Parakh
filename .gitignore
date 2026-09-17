@@ -41,3 +41,7 @@ infra/data/
 # Misc
 tmp/
 .cache/
+
+# Java / Maven
+**/target/
+.mvn/
