@@ -50,6 +50,13 @@ const SERVICE_ROUTES: Record<string, { target: string; pathRewrite: Record<strin
   },
 };
 
+import * as http from 'http';
+
+const keepAliveAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 200,
+});
+
 @Controller()
 export class ProxyController {
   private proxies: Map<string, RequestHandler> = new Map();
@@ -62,6 +69,7 @@ export class ProxyController {
         createProxyMiddleware({
           target: config.target,
           changeOrigin: true,
+          agent: keepAliveAgent,
           pathRewrite: config.pathRewrite,
           on: {
             proxyReq: fixRequestBody,

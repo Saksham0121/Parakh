@@ -43,6 +43,7 @@ services:
     image: redis:7-alpine
     container_name: parakh-redis
     restart: unless-stopped
+    command: ["redis-server", "--save", ""]
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -109,6 +110,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
+      LISTEN_PORT: 6432
+      AUTH_TYPE: scram-sha-256
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 200
       DEFAULT_POOL_SIZE: 20
@@ -143,6 +146,9 @@ services:
       - JWT_SECRET=${JWT_SECRET:-parakh_secret}
       - RATE_LIMIT_MAX_TOKENS=${RATE_LIMIT_MAX_TOKENS:-60}
       - RATE_LIMIT_REFILL_RATE=${RATE_LIMIT_REFILL_RATE:-1}
+      - LOG_LEVEL=warn
+      - OTEL_TRACES_SAMPLER=traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
     depends_on:
       - redis
       - user-service
@@ -157,10 +163,18 @@ services:
     container_name: parakh-user-service
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@postgres:5432/${POSTGRES_DB:-parakh}
+      - DATABASE_URL=postgres://${POSTGRES_USER:-parakh}:${POSTGRES_PASSWORD:-parakh_secret}@pgbouncer:6432/${POSTGRES_DB:-parakh}?connection_limit=20&pool_timeout=20&pgbouncer=true
       - JWT_SECRET=${JWT_SECRET:-parakh_secret}
+      - REDIS_HOST=redis
+      - LOG_LEVEL=warn
+      - OTEL_TRACES_SAMPLER=traceidratio
+      - OTEL_TRACES_SAMPLER_ARG=0.1
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      redis:
         condition: service_healthy
 
   market-data-service:

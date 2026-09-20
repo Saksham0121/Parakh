@@ -21,7 +21,8 @@
     "docker:up": "docker compose -f infra/docker-compose.yml up -d",
     "docker:down": "docker compose -f infra/docker-compose.yml down",
     "docker:logs": "docker compose -f infra/docker-compose.yml logs -f",
-    "docker:build": "docker compose -f infra/docker-compose.yml build"
+    "docker:build": "docker compose -f infra/docker-compose.yml build",
+    "dev:all": "concurrently \"npm run dev -w @parakh/api-gateway\" \"npm run dev -w @parakh/websocket-gateway\" \"npm run dev -w @parakh/user-service\" \"npm run dev -w @parakh/market-data-service\" \"npm run dev -w @parakh/indicator-service\" \"npm run dev -w @parakh/setup-service\" \"npm run dev -w @parakh/alert-service\" \"npm run dev -w @parakh/backtest-service\" \"npm run dev -w @parakh/fundamentals-service\""
   },
   "devDependencies": {
     "concurrently": "^10.0.5"

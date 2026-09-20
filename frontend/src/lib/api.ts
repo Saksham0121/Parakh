@@ -15,14 +15,13 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     headers,
   });
 
-  if (response.status === 401) {
-    useAuthStore.getState().logout();
-    throw new Error('Unauthorized');
-  }
-
   if (!response.ok) {
+    if (response.status === 401) {
+      useAuthStore.getState().logout();
+    }
     const err = await response.json().catch(() => ({ message: 'API Error' }));
-    throw new Error(err.message || response.statusText);
+    const message = Array.isArray(err.message) ? err.message[0] : err.message;
+    throw new Error(message || response.statusText || 'API Error');
   }
 
   return response.json();
