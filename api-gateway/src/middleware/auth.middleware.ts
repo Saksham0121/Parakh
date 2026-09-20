@@ -22,8 +22,6 @@ export class AuthMiddleware implements NestMiddleware {
   }
 
   use(req: Request, _res: Response, next: NextFunction) {
-    console.log(`[AuthMiddleware] req.method=${req.method} req.path=${req.path} req.originalUrl=${req.originalUrl}`);
-
     // Skip auth for public routes (ignoring query strings if any)
     const urlPath = req.originalUrl.split('?')[0];
     const isPublic = PUBLIC_ROUTES.some(
