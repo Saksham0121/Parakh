@@ -22,4 +22,9 @@ export class WatchlistController {
   async removeSymbol(@Request() req: any, @Param('symbol') symbol: string) {
     return this.watchlistService.removeSymbol(req.user.userId, symbol.toUpperCase());
   }
+
+  @Get('cache-metrics')
+  async getCacheMetrics() {
+    return this.watchlistService.getCacheMetrics();
+  }
 }

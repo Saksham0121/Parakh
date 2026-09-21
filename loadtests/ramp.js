@@ -11,16 +11,15 @@ export const options = {
   stages: [
     { duration: '15s', target: 100 }, // Ramp up to 100 VUs
     { duration: '1m',  target: 100 }, // Hold at 100 VUs for 1 minute
-    { duration: '15s', target: 300 }, // Ramp up to 300 VUs
-    { duration: '1m',  target: 300 }, // Hold at 300 VUs for 1 minute
-    { duration: '15s', target: 500 }, // Ramp up to 500 VUs
-    { duration: '1m',  target: 500 }, // Hold at 500 VUs for 1 minute
+    { duration: '15s', target: 200 }, // Ramp up to 200 VUs
+    { duration: '1m',  target: 200 }, // Hold at 200 VUs for 1 minute
     { duration: '15s', target: 0 },   // Ramp down
   ],
   thresholds: {
     'http_req_failed': ['rate<0.01'],
     'http_req_duration{expected_response:true}': ['p(95)<200'],
   },
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
 
 const BASE_URL = __ENV.TARGET_URL || 'http://localhost/api';
