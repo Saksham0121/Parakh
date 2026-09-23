@@ -95,7 +95,7 @@ DATABASE_URL="postgresql://parakh:parakh_secret@localhost:5434/parakh?schema=pub
 echo -e "${GREEN}Database verified & default admin seeded (admin@parakh.com / password123).${NC}"
 
 # 5. Launch All Services
-echo -e "\n${BLUE}[4/4] Launching microservices and frontend...${NC}"
+echo -e "\n${BLUE}[4/4] Launching consolidated Spring Boot services and frontend...${NC}"
 echo -e "${BOLD}${GREEN}Ready! Press Ctrl+C at any time to shut down all services cleanly.${NC}\n"
 
 INCLUDE_FRONTEND=true
@@ -105,29 +105,15 @@ fi
 
 if [ "$INCLUDE_FRONTEND" = true ]; then
   npx concurrently -k \
-    -n "gateway,ws,user,market,indicator,setup,alert,backtest,fundamentals,frontend" \
-    -c "green,blue,yellow,magenta,cyan,white,red,gray,greenBright,cyanBright" \
-    "npm run dev -w @parakh/api-gateway" \
-    "npm run dev -w @parakh/websocket-gateway" \
-    "npm run dev -w @parakh/user-service" \
-    "npm run dev -w @parakh/market-data-service" \
-    "npm run dev -w @parakh/indicator-service" \
-    "npm run dev -w @parakh/setup-service" \
-    "npm run dev -w @parakh/alert-service" \
-    "npm run dev -w @parakh/backtest-service" \
-    "npm run dev -w @parakh/fundamentals-service" \
+    -n "core,engine,frontend" \
+    -c "green,cyan,magenta" \
+    "mvn -f backend spring-boot:run -pl parakh-core" \
+    "mvn -f backend spring-boot:run -pl parakh-engine" \
     "npm run dev -w @parakh/frontend"
 else
   npx concurrently -k \
-    -n "gateway,ws,user,market,indicator,setup,alert,backtest,fundamentals" \
-    -c "green,blue,yellow,magenta,cyan,white,red,gray,greenBright" \
-    "npm run dev -w @parakh/api-gateway" \
-    "npm run dev -w @parakh/websocket-gateway" \
-    "npm run dev -w @parakh/user-service" \
-    "npm run dev -w @parakh/market-data-service" \
-    "npm run dev -w @parakh/indicator-service" \
-    "npm run dev -w @parakh/setup-service" \
-    "npm run dev -w @parakh/alert-service" \
-    "npm run dev -w @parakh/backtest-service" \
-    "npm run dev -w @parakh/fundamentals-service"
+    -n "core,engine" \
+    -c "green,cyan" \
+    "mvn -f backend spring-boot:run -pl parakh-core" \
+    "mvn -f backend spring-boot:run -pl parakh-engine"
 fi
