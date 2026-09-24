@@ -6,6 +6,7 @@ import {
   SkipForward,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   CheckCircle2,
   Activity,
   Layers,
@@ -76,6 +77,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
   const [endDate, setEndDate] = useState('');
   const [status, setStatus] = useState<'idle' | 'pending' | 'running' | 'completed' | 'failed'>('idle');
   const [progress, setProgress] = useState(0);
+  const [runError, setRunError] = useState<string | null>(null);
   const [playbackData, setPlaybackData] = useState<PlaybackData | null>(null);
 
   // Playback Animation State
@@ -93,6 +95,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
   const chartCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const equityCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [canvasWidth, setCanvasWidth] = useState(900);
 
   // Observe Container Resize for 100% responsive canvas rendering
@@ -113,10 +116,21 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
   useEffect(() => {
     api.getSetups()
       .then((data) => {
-        setSetups(data);
-        if (data.length > 0) setSelectedSetup(data[0].id);
+        if (data && data.length > 0) {
+          setSetups(data);
+          setSelectedSetup(data[0].id);
+        } else {
+          const fallback = [{ id: 'default-ma', name: 'EMA 20/50 Trend Follower (Built-in)' }];
+          setSetups(fallback);
+          setSelectedSetup(fallback[0].id);
+        }
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error(err);
+        const fallback = [{ id: 'default-ma', name: 'EMA 20/50 Trend Follower (Built-in)' }];
+        setSetups(fallback);
+        setSelectedSetup(fallback[0].id);
+      });
 
     const end = new Date();
     const start = new Date();
@@ -136,14 +150,16 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
 
   // Poll for Backtest Completion
   const pollStatus = useCallback((id: string) => {
-    const interval = window.setInterval(async () => {
+    if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+    pollTimerRef.current = window.setInterval(async () => {
       try {
         const res = await api.getBacktestStatus(id);
         setStatus(res.status);
         setProgress(res.progress || 0);
 
         if (res.status === 'completed') {
-          window.clearInterval(interval);
+          if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
           const fullPlayback = await api.getBacktestPlayback(id);
           setPlaybackData(fullPlayback);
           if (fullPlayback.bars && fullPlayback.bars.length > 0) {
@@ -153,20 +169,37 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
             setIsPlaying(true);
           }
         } else if (res.status === 'failed') {
-          window.clearInterval(interval);
+          if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+          setRunError('This backtest could not be completed. Adjust the date range or setup and try again.');
         }
       } catch (err) {
         console.error('Error polling backtest status', err);
-        window.clearInterval(interval);
+        if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
         setStatus('failed');
+        setRunError('The backtest service stopped responding. Please try again.');
       }
     }, 1200);
   }, []);
 
+  useEffect(() => () => {
+    if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+    if (animationTimerRef.current) window.clearInterval(animationTimerRef.current);
+  }, []);
+
   // Trigger Backtest Run
   const handleRun = async () => {
-    if (!selectedSetup) return;
+    if (!selectedSetup) {
+      setRunError('Choose a saved setup before running a backtest.');
+      return;
+    }
+    if (!startDate || !endDate || new Date(startDate) > new Date(endDate)) {
+      setRunError('Choose a valid date range where the start date is before the end date.');
+      return;
+    }
     try {
+      setRunError(null);
       setStatus('running');
       setProgress(10);
       setPlaybackData(null);
@@ -183,6 +216,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
     } catch (error) {
       console.error('Failed to trigger backtest', error);
       setStatus('failed');
+      setRunError(error instanceof Error ? error.message : 'Could not start this backtest. Please try again.');
     }
   };
 
@@ -701,12 +735,12 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
   const currentReturnPct = (((currentEquityValue - 100000) / 100000) * 100).toFixed(2);
 
   return (
-    <div className="workspace-scroll backtest-dashboard max-w-[1400px] mx-auto py-6 px-4 md:px-8 space-y-6 animate-fade-in">
+    <div className="workspace-scroll backtest-dashboard max-w-[1400px] mx-auto !py-5 !px-4 md:!px-8 space-y-5 animate-fade-in">
       {/* ─── Top Header Banner ─── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <span className="px-2.5 py-1 text-[10px] font-mono font-bold bg-[#2962FF]/15 text-[#2962FF] border border-[#2962FF]/30 rounded-md uppercase tracking-widest shadow-[0_0_12px_rgba(41,98,255,0.2)]">
+            <span className="!px-2.5 !py-1 text-[10px] font-mono font-bold bg-[#2962FF]/15 text-[#2962FF] border border-[#2962FF]/30 rounded-md uppercase tracking-widest shadow-[0_0_12px_rgba(41,98,255,0.2)]">
               SIMULATION DESK
             </span>
             <span className="text-xs font-mono text-[#606E85]">· Point-in-Time Verified Engine</span>
@@ -721,7 +755,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
 
         {/* Status Pill */}
         {playbackData && (
-          <div className="flex items-center gap-3.5 px-4 py-2.5 bg-[#0C1019] border border-[#1E273A] rounded-xl shadow-lg">
+          <div className="flex items-center gap-3 !px-3.5 !py-2 bg-[#0C1019] border border-[#1E273A] rounded-xl shadow-lg">
             <div className="w-2.5 h-2.5 rounded-full bg-[#089981] animate-pulse shadow-[0_0_8px_#089981]" />
             <div className="flex flex-col">
               <span className="text-[10px] font-mono text-[#606E85] uppercase">Active Simulation</span>
@@ -735,9 +769,9 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
 
       {/* ─── Simulation Parameters Card ─── */}
       <section className="workspace-card rounded-2xl border border-[#1A2234] bg-[#0A0E18]/90 backdrop-blur-md shadow-xl overflow-hidden">
-        <div className="card-heading flex-wrap gap-3 border-b border-[#1A2234] px-6 py-4 bg-[#080B13]">
+        <div className="card-heading flex-wrap gap-3 border-b border-[#1A2234] !px-5 !py-3.5 bg-[#080B13] flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-[#2962FF]/10 text-[#2962FF]">
+            <div className="!p-1.5 rounded-lg bg-[#2962FF]/10 text-[#2962FF]">
               <Sliders size={15} />
             </div>
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#F0F4F8]">
@@ -755,7 +789,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
               <button
                 key={label}
                 onClick={() => handleSetPresetRange(m)}
-                className="px-3 py-1.5 bg-[#0D121F] border border-[#1E273A] hover:border-[#2962FF] text-[#F0F4F8] hover:text-[#2962FF] hover:bg-[#2962FF]/10 text-[10px] font-mono font-bold rounded-lg transition-all duration-150 cursor-pointer"
+                className="!px-2.5 !py-1 bg-[#0D121F] border border-[#1E273A] hover:border-[#2962FF] text-[#F0F4F8] hover:text-[#2962FF] hover:bg-[#2962FF]/10 text-[10px] font-mono font-bold rounded-md transition-all duration-150 cursor-pointer"
               >
                 {label}
               </button>
@@ -763,28 +797,31 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
           </div>
         </div>
 
-        <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-5 bg-[#090D16]">
+        <div className="!p-5 grid grid-cols-1 md:grid-cols-4 gap-4 bg-[#090D16] items-stretch">
           {/* Setup Strategy Feature Box */}
-          <div className="flex flex-col gap-2 p-3.5 bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/50 rounded-xl transition-all duration-200 shadow-inner group">
+          <div className="flex flex-col justify-between !p-3 !h-[76px] bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/50 rounded-xl transition-all duration-200 shadow-inner group">
             <label className="text-[10px] font-mono font-bold text-[#787B86] group-hover:text-[#2962FF] uppercase tracking-wider flex items-center gap-1.5 transition-colors">
               <Layers size={13} className="text-[#2962FF]" />
               Setup Strategy
             </label>
-            <select
-              value={selectedSetup}
-              onChange={(e) => setSelectedSetup(e.target.value)}
-              className="w-full h-10 px-3 bg-[#0A0E18] border border-[#1A2438] focus:border-[#2962FF] focus:ring-2 focus:ring-[#2962FF]/30 rounded-lg text-xs font-mono text-[#F0F4F8] transition-all outline-none"
-            >
-              {setups.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative w-full">
+              <select
+                value={selectedSetup}
+                onChange={(e) => setSelectedSetup(e.target.value)}
+                className="w-full !h-8 !px-2.5 !pr-7 bg-[#0A0E18] border border-[#1A2438] focus:border-[#2962FF] rounded-lg text-xs font-mono text-[#F0F4F8] transition-all outline-none appearance-none cursor-pointer"
+              >
+                {setups.map((s) => (
+                  <option key={s.id} value={s.id} className="bg-[#121721] text-[#F0F4F8]">
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2.5 text-[#787B86]" />
+            </div>
           </div>
 
           {/* From Date Feature Box */}
-          <div className="flex flex-col gap-2 p-3.5 bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/50 rounded-xl transition-all duration-200 shadow-inner group">
+          <div className="flex flex-col justify-between !p-3 !h-[76px] bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/50 rounded-xl transition-all duration-200 shadow-inner group">
             <label className="text-[10px] font-mono font-bold text-[#787B86] group-hover:text-[#2962FF] uppercase tracking-wider flex items-center gap-1.5 transition-colors">
               <Calendar size={13} className="text-[#2962FF]" />
               From Date
@@ -793,12 +830,12 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full h-10 px-3 bg-[#0A0E18] border border-[#1A2438] focus:border-[#2962FF] focus:ring-2 focus:ring-[#2962FF]/30 rounded-lg text-xs font-mono text-[#F0F4F8] transition-all outline-none"
+              className="w-full !h-8 !px-2.5 bg-[#0A0E18] border border-[#1A2438] focus:border-[#2962FF] rounded-lg text-xs font-mono text-[#F0F4F8] transition-all outline-none cursor-pointer"
             />
           </div>
 
           {/* To Date Feature Box */}
-          <div className="flex flex-col gap-2 p-3.5 bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/50 rounded-xl transition-all duration-200 shadow-inner group">
+          <div className="flex flex-col justify-between !p-3 !h-[76px] bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/50 rounded-xl transition-all duration-200 shadow-inner group">
             <label className="text-[10px] font-mono font-bold text-[#787B86] group-hover:text-[#2962FF] uppercase tracking-wider flex items-center gap-1.5 transition-colors">
               <Calendar size={13} className="text-[#2962FF]" />
               To Date
@@ -807,29 +844,29 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full h-10 px-3 bg-[#0A0E18] border border-[#1A2438] focus:border-[#2962FF] focus:ring-2 focus:ring-[#2962FF]/30 rounded-lg text-xs font-mono text-[#F0F4F8] transition-all outline-none"
+              className="w-full !h-8 !px-2.5 bg-[#0A0E18] border border-[#1A2438] focus:border-[#2962FF] rounded-lg text-xs font-mono text-[#F0F4F8] transition-all outline-none cursor-pointer"
             />
           </div>
 
           {/* Run Action Button Container */}
-          <div className="flex flex-col justify-end">
+          <div className="flex flex-col !h-[76px]">
             <button
               onClick={handleRun}
               disabled={!selectedSetup || status === 'running'}
-              className={`w-full h-[62px] font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2.5 rounded-xl transition-all duration-200 cursor-pointer ${
+              className={`w-full !h-full font-mono text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 rounded-xl transition-all duration-200 cursor-pointer shadow-md ${
                 status === 'running'
                   ? 'bg-[#121724] text-[#606E85] border border-[#1A2234] cursor-not-allowed'
-                  : 'bg-gradient-to-r from-[#2962FF] to-[#1E4BD8] hover:from-[#3872FF] hover:to-[#2558F0] text-white shadow-[0_0_20px_rgba(41,98,255,0.35)] hover:shadow-[0_0_25px_rgba(41,98,255,0.6)] hover:scale-[1.02] active:scale-[0.98]'
+                  : 'bg-gradient-to-r from-[#2962FF] to-[#1E4BD8] hover:from-[#3872FF] hover:to-[#2558F0] text-white shadow-[0_0_20px_rgba(41,98,255,0.35)] hover:shadow-[0_0_25px_rgba(41,98,255,0.6)] hover:scale-[1.01] active:scale-[0.99]'
               }`}
             >
               {status === 'running' ? (
                 <>
-                  <Activity className="animate-spin text-[#2962FF]" size={16} />
+                  <Activity className="animate-spin text-[#2962FF]" size={15} />
                   <span>Simulating ({progress}%)</span>
                 </>
               ) : (
                 <>
-                  <Zap size={16} fill="currentColor" />
+                  <Zap size={15} fill="currentColor" />
                   <span>Run Backtest</span>
                 </>
               )}
@@ -848,6 +885,13 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
         )}
       </section>
 
+      {runError && (
+        <div role="alert" className="mt-4 flex items-start gap-2 border border-[#F23645]/35 bg-[#F23645]/10 px-4 py-3 text-xs text-[#FF98A2]">
+          <ShieldAlert size={16} className="mt-0.5 flex-shrink-0" />
+          <span>{runError}</span>
+        </div>
+      )}
+
       {/* ─── Visual Replay Deck & Candlestick Workspace ─── */}
       {playbackData && (
         <section
@@ -855,10 +899,10 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
           className="workspace-card rounded-2xl border border-[#1A2234] bg-[#0A0E18]/95 backdrop-blur-md shadow-2xl overflow-hidden animate-fade-in"
         >
           {/* Deck Header & Replay Control Toolbar */}
-          <div className="px-6 py-4 border-b border-[#1A2234] bg-[#080B13] flex flex-wrap items-center justify-between gap-4">
+          <div className="!px-5 !py-3 border-b border-[#1A2234] bg-[#080B13] flex flex-wrap items-center justify-between gap-3">
             {/* Left Status & Symbol Tag */}
-            <div className="flex items-center gap-3.5">
-              <span className="px-2.5 py-1 text-[10px] font-mono font-bold bg-[#2962FF]/15 text-[#2962FF] border border-[#2962FF]/30 rounded-md uppercase tracking-wide">
+            <div className="flex items-center gap-3">
+              <span className="!px-2.5 !py-1 text-[10px] font-mono font-bold bg-[#2962FF]/15 text-[#2962FF] border border-[#2962FF]/30 rounded-md uppercase tracking-wide">
                 REPLAY ACTIVE
               </span>
               <div className="flex flex-col">
@@ -873,16 +917,16 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
             </div>
 
             {/* Center: Playback Controls */}
-            <div className="flex items-center gap-2 bg-[#060910] p-1.5 border border-[#1A2234] rounded-xl shadow-inner">
+            <div className="flex items-center gap-1.5 bg-[#060910] !p-1 border border-[#1A2234] rounded-xl shadow-inner">
               <button
                 onClick={() => {
                   setCurrentBarIndex(0);
                   setIsPlaying(true);
                 }}
                 title="Restart from Beginning"
-                className="w-9 h-9 flex items-center justify-center text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer"
+                className="!w-8 !h-8 flex items-center justify-center text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer"
               >
-                <RotateCcw size={14} />
+                <RotateCcw size={13} />
               </button>
 
               <button
@@ -891,17 +935,17 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                   setIsPlaying(false);
                 }}
                 title="Step 1 Bar Backward"
-                className="w-9 h-9 flex items-center justify-center text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer"
+                className="!w-8 !h-8 flex items-center justify-center text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer"
               >
-                <ChevronLeft size={18} />
+                <ChevronLeft size={16} />
               </button>
 
               <button
                 onClick={() => setIsPlaying(!isPlaying)}
                 title={isPlaying ? 'Pause (Space)' : 'Play Replay (Space)'}
-                className="w-11 h-9 flex items-center justify-center bg-[#2962FF] hover:bg-[#1E4BD8] text-white rounded-lg shadow-[0_0_15px_rgba(41,98,255,0.4)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                className="!w-10 !h-8 flex items-center justify-center bg-[#2962FF] hover:bg-[#1E4BD8] text-white rounded-lg shadow-[0_0_15px_rgba(41,98,255,0.4)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
               >
-                {isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
+                {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
               </button>
 
               <button
@@ -910,23 +954,23 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                   setIsPlaying(false);
                 }}
                 title="Step 1 Bar Forward"
-                className="w-9 h-9 flex items-center justify-center text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer"
+                className="!w-8 !h-8 flex items-center justify-center text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer"
               >
-                <ChevronRight size={18} />
+                <ChevronRight size={16} />
               </button>
 
               <button
                 onClick={handleJumpToNextTrade}
                 title="Skip to Next Trade"
-                className="px-3 h-9 flex items-center gap-1.5 text-xs font-mono font-bold text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer border-l border-[#1A2234] ml-1"
+                className="!px-2.5 !h-8 flex items-center gap-1.5 text-xs font-mono font-bold text-[#F0F4F8] hover:bg-[#121826] rounded-lg transition-all cursor-pointer border-l border-[#1A2234] ml-0.5"
               >
-                <SkipForward size={14} className="text-[#2962FF]" />
+                <SkipForward size={13} className="text-[#2962FF]" />
                 <span className="text-[11px]">Next Trade</span>
               </button>
             </div>
 
             {/* Right: Speed Pills */}
-            <div className="flex items-center border border-[#1A2234] bg-[#060910] p-1 rounded-xl shadow-inner gap-1">
+            <div className="flex items-center border border-[#1A2234] bg-[#060910] !p-1 rounded-xl shadow-inner gap-1">
               {[
                 { label: '1x', val: 2 },
                 { label: '5x', val: 5 },
@@ -936,7 +980,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                 <button
                   key={label}
                   onClick={() => setPlaybackSpeed(val)}
-                  className={`px-3 py-1 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                  className={`!px-2.5 !py-0.5 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
                     playbackSpeed === val
                       ? 'bg-[#2962FF] text-white shadow-md'
                       : 'text-[#606E85] hover:text-white bg-transparent'
@@ -949,7 +993,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
           </div>
 
           {/* Bar Info & Floating Indicator HUD */}
-          <div className="mx-6 my-3 px-5 py-2.5 bg-[#060910]/90 border border-[#161E2E] rounded-xl flex flex-wrap items-center justify-between text-xs font-mono shadow-md backdrop-blur-md">
+          <div className="!mx-5 !my-2.5 !px-4 !py-2 bg-[#060910]/90 border border-[#161E2E] rounded-xl flex flex-wrap items-center justify-between text-xs font-mono shadow-md backdrop-blur-md">
             {activeDisplayBar ? (
               <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
                 <span className="text-[#606E85]">
@@ -1013,7 +1057,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
           </div>
 
           {/* Timeline Scrubber Slider with Trade Event Pips */}
-          <div className="px-6 py-4 bg-[#080B13] border-t border-b border-[#1A2234] flex flex-col gap-2.5">
+          <div className="!px-5 !py-3 bg-[#080B13] border-t border-b border-[#1A2234] flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs font-mono">
               <span className="text-[#787B86]">
                 Timeline Scrub: Bar <strong className="text-[#F0F4F8]">{currentBarIndex + 1}</strong> of{' '}
@@ -1045,13 +1089,13 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                   setCurrentBarIndex(Number(e.target.value));
                   setIsPlaying(false);
                 }}
-                className="w-full accent-[#2962FF] cursor-pointer h-2 bg-[#121824] rounded-lg focus:outline-none"
+                className="w-full accent-[#2962FF] cursor-pointer !h-2 !p-0 !border-0 bg-[#121824] rounded-lg focus:outline-none"
               />
             </div>
           </div>
 
           {/* Synchronized Equity Curve Deck */}
-          <div className="p-6 bg-[#06090E]">
+          <div className="!p-5 bg-[#06090E]">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[10px] font-mono uppercase tracking-wider text-[#787B86] font-bold flex items-center gap-1.5">
                 <Activity size={13} className="text-[#089981]" />
@@ -1071,7 +1115,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
       {/* ─── Performance Report Grid ─── */}
       {playbackData?.result && (
         <section className="workspace-card rounded-2xl border border-[#1A2234] bg-[#0A0E18]/90 backdrop-blur-md shadow-xl overflow-hidden animate-fade-in">
-          <div className="card-heading border-b border-[#1A2234] px-6 py-4 bg-[#080B13]">
+          <div className="card-heading border-b border-[#1A2234] !px-5 !py-3.5 bg-[#080B13]">
             <span className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-[#F0F4F8]">
               <CheckCircle2 size={15} className="text-[#089981]" />
               Simulation Performance Report
@@ -1081,8 +1125,8 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
             </small>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-5 p-6 bg-[#090D16]">
-            <div className="p-5 bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-1 shadow-lg group">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 !p-5 bg-[#090D16]">
+            <div className="!p-4 bg-[#060910] border border-[#161E2E] hover:border-[#2962FF]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-0.5 shadow-lg group">
               <span className="text-[10px] font-mono font-bold text-[#787B86] group-hover:text-[#2962FF] uppercase tracking-wider flex items-center gap-1.5 transition-colors">
                 <Target size={13} className="text-[#2962FF]" />
                 Win Rate
@@ -1095,7 +1139,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
               </span>
             </div>
 
-            <div className="p-5 bg-[#060910] border border-[#161E2E] hover:border-[#A855F7]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-1 shadow-lg group">
+            <div className="!p-4 bg-[#060910] border border-[#161E2E] hover:border-[#A855F7]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-0.5 shadow-lg group">
               <span className="text-[10px] font-mono font-bold text-[#787B86] group-hover:text-[#A855F7] uppercase tracking-wider flex items-center gap-1.5 transition-colors">
                 <Layers size={13} className="text-[#A855F7]" />
                 Total Trades
@@ -1106,7 +1150,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
               <span className="text-[10px] font-mono text-[#606E85]">Closed positions</span>
             </div>
 
-            <div className="p-5 bg-[#060910] border border-[#161E2E] hover:border-[#089981]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-1 shadow-lg group">
+            <div className="!p-4 bg-[#060910] border border-[#161E2E] hover:border-[#089981]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-0.5 shadow-lg group">
               <span className="text-[10px] font-mono font-bold text-[#787B86] group-hover:text-[#089981] uppercase tracking-wider flex items-center gap-1.5 transition-colors">
                 <TrendingUp size={13} className="text-[#089981]" />
                 Avg. Trade Return
@@ -1122,7 +1166,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
               <span className="text-[10px] font-mono text-[#606E85]">Per-trade expectancy</span>
             </div>
 
-            <div className="p-5 bg-[#060910] border border-[#161E2E] hover:border-[#F23645]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-1 shadow-lg group">
+            <div className="!p-4 bg-[#060910] border border-[#161E2E] hover:border-[#F23645]/40 rounded-xl flex flex-col gap-1.5 transition-all duration-200 hover:-translate-y-0.5 shadow-lg group">
               <span className="text-[10px] font-mono font-bold text-[#787B86] group-hover:text-[#F23645] uppercase tracking-wider flex items-center gap-1.5 transition-colors">
                 <ShieldAlert size={13} className="text-[#F23645]" />
                 Max Drawdown
@@ -1139,7 +1183,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
       {/* ─── Executed Trade Log Table ─── */}
       {playbackData?.trades && playbackData.trades.length > 0 && (
         <section className="workspace-card rounded-2xl border border-[#1A2234] bg-[#0A0E18]/90 backdrop-blur-md shadow-xl overflow-hidden animate-fade-in">
-          <div className="card-heading border-b border-[#1A2234] px-6 py-4 bg-[#080B13]">
+          <div className="card-heading border-b border-[#1A2234] !px-5 !py-3.5 bg-[#080B13]">
             <span className="flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-[#F0F4F8]">
               <Layers size={14} className="text-[#2962FF]" />
               Executed Trade Log ({playbackData.trades.length})
@@ -1153,13 +1197,13 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
             <table className="data-table w-full">
               <thead>
                 <tr className="border-b border-[#1A2234] text-left text-[10px] font-mono text-[#606E85] uppercase tracking-wider bg-[#060910]">
-                  <th className="p-3.5">#</th>
-                  <th className="p-3.5">Entry Date &amp; Price</th>
-                  <th className="p-3.5">Exit Date &amp; Price</th>
-                  <th className="p-3.5">Exit Reason</th>
-                  <th className="p-3.5 text-right">Return %</th>
-                  <th className="p-3.5 text-center">Outcome</th>
-                  <th className="p-3.5 text-center">Action</th>
+                  <th className="!px-4 !py-3">#</th>
+                  <th className="!px-4 !py-3">Entry Date &amp; Price</th>
+                  <th className="!px-4 !py-3">Exit Date &amp; Price</th>
+                  <th className="!px-4 !py-3">Exit Reason</th>
+                  <th className="!px-4 !py-3 text-right">Return %</th>
+                  <th className="!px-4 !py-3 text-center">Outcome</th>
+                  <th className="!px-4 !py-3 text-center">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1174,8 +1218,8 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                         isCurrent ? 'bg-[#151D2E]' : 'hover:bg-[#0D121D]'
                       }`}
                     >
-                      <td className="p-3.5 text-[#606E85]">#{idx + 1}</td>
-                      <td className="p-3.5">
+                      <td className="!px-4 !py-3 text-[#606E85]">#{idx + 1}</td>
+                      <td className="!px-4 !py-3">
                         <div className="flex flex-col">
                           <span className="text-[#F0F4F8] font-bold">
                             ${trade.entryPrice.toFixed(2)}
@@ -1185,7 +1229,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                           </span>
                         </div>
                       </td>
-                      <td className="p-3.5">
+                      <td className="!px-4 !py-3">
                         <div className="flex flex-col">
                           <span className="text-[#F0F4F8] font-bold">
                             ${trade.exitPrice.toFixed(2)}
@@ -1195,18 +1239,18 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                           </span>
                         </div>
                       </td>
-                      <td className="p-3.5">
-                        <span className="text-[10px] px-2.5 py-1 bg-[#060910] border border-[#1A2234] text-[#787B86] uppercase font-bold rounded-md">
+                      <td className="!px-4 !py-3">
+                        <span className="text-[10px] !px-2.5 !py-1 bg-[#060910] border border-[#1A2234] text-[#787B86] uppercase font-bold rounded-md">
                           {trade.exitReason.replace('_', ' ')}
                         </span>
                       </td>
-                      <td className={`p-3.5 text-right font-bold ${isWin ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                      <td className={`!px-4 !py-3 text-right font-bold ${isWin ? 'text-[#089981]' : 'text-[#F23645]'}`}>
                         {isWin ? '+' : ''}
                         {trade.returnPct.toFixed(2)}%
                       </td>
-                      <td className="p-3.5 text-center">
+                      <td className="!px-4 !py-3 text-center">
                         <span
-                          className={`text-[10px] px-2.5 py-1 font-bold uppercase rounded-md border ${
+                          className={`text-[10px] !px-2.5 !py-1 font-bold uppercase rounded-md border ${
                             isWin
                               ? 'bg-[#089981]/15 text-[#089981] border-[#089981]/30'
                               : 'bg-[#F23645]/15 text-[#F23645] border-[#F23645]/30'
@@ -1215,13 +1259,13 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
                           {trade.result}
                         </span>
                       </td>
-                      <td className="p-3.5 text-center">
+                      <td className="!px-4 !py-3 text-center">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleSelectTrade(trade);
                           }}
-                          className="px-3 py-1 bg-[#2962FF]/15 hover:bg-[#2962FF] text-[#2962FF] hover:text-white border border-[#2962FF]/30 rounded-lg text-[10px] font-mono font-bold transition-all duration-150 cursor-pointer shadow-sm hover:shadow-[0_0_10px_rgba(41,98,255,0.4)]"
+                          className="!px-3 !py-1 bg-[#2962FF]/15 hover:bg-[#2962FF] text-[#2962FF] hover:text-white border border-[#2962FF]/30 rounded-lg text-[10px] font-mono font-bold transition-all duration-150 cursor-pointer shadow-sm hover:shadow-[0_0_10px_rgba(41,98,255,0.4)]"
                         >
                           Replay
                         </button>
