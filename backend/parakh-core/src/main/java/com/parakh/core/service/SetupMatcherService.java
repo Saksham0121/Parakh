@@ -91,7 +91,7 @@ public class SetupMatcherService {
                 snapshot.put(indType, Map.of("isMatch", false, "reason", "value unavailable"));
             } else {
                 double val = extractNumericValue(relevant.value());
-                double threshold = cond.getValue() != null ? cond.getValue() : (cond.getThreshold() != null ? cond.getThreshold() : 0.0);
+                double threshold = cond.getNumericTarget(0.0);
                 String op = cond.getOperator() != null ? cond.getOperator() : "gt";
 
                 isMatch = ConditionMatcher.evaluate(op, val, threshold);

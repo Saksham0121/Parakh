@@ -194,7 +194,7 @@ public class BacktestSimulatorService {
                 if (!inTrade && i + 1 < n && technicalConditions != null && !technicalConditions.isEmpty()) {
                     boolean allMatch = true;
                     for (TechnicalConditionDto cond : technicalConditions) {
-                        double target = cond.getValue() != null ? cond.getValue() : (cond.getThreshold() != null ? cond.getThreshold() : 0.0);
+                        double target = cond.getNumericTarget(0.0);
                         String op = cond.getOperator() != null ? cond.getOperator() : "gt";
 
                         // Evaluate against close price for simple indicators

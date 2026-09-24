@@ -1,16 +1,17 @@
 package com.parakh.engine.backtest;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.NotBlank;
-
-import java.time.Instant;
 
 public class BacktestDtos {
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record CreateBacktestRequest(
         @NotBlank String setupId,
         @NotBlank String symbol,
-        @NotBlank String startDate,
-        @NotBlank String endDate
+        @JsonAlias({"startDate", "dateRangeStart"}) String startDate,
+        @JsonAlias({"endDate", "dateRangeEnd"}) String endDate
     ) {}
 
     public record BacktestStatusResponse(

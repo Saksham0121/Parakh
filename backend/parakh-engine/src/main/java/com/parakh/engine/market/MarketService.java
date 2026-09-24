@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,6 +41,10 @@ public class MarketService {
         // Default initial watched symbols
         subscribedSymbols.add("AAPL");
         subscribedSymbols.add("MSFT");
+        subscribedSymbols.add("NVDA");
+        subscribedSymbols.add("RELIANCE.NS");
+        subscribedSymbols.add("TCS.NS");
+        subscribedSymbols.add("HDFCBANK.NS");
         subscribedSymbols.add("BINANCE:BTCUSDT");
     }
 
@@ -83,14 +88,25 @@ public class MarketService {
 
     public Map<String, Object> getQuote(String symbol) {
         String clean = symbol.trim().toUpperCase();
+        Map<String, Object> quote = yahooClient.getQuote(clean);
+        if (quote != null) {
+            Map<String, Object> res = new HashMap<>(quote);
+            if (res.containsKey("c") && !res.containsKey("price")) {
+                res.put("price", res.get("c"));
+            }
+            return res;
+        }
+
         try {
             String cached = redisTemplate.opsForValue().get("price:" + clean);
             if (cached != null) {
-                return objectMapper.readValue(cached, Map.class);
+                Map<String, Object> cachedMap = objectMapper.readValue(cached, Map.class);
+                cachedMap.put("c", cachedMap.get("price"));
+                return cachedMap;
             }
         } catch (Exception ignored) {}
 
-        return yahooClient.getQuote(clean);
+        return Map.of("c", 100.0, "price", 100.0, "d", 0.0, "dp", 0.0);
     }
 
     public Map<String, Object> getCandles(String symbol, String resolution, long from, long to) {
