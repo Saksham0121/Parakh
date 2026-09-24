@@ -35,7 +35,7 @@ sed -i '' 's/:5432\//:5434\//g' .env 2>/dev/null || sed -i 's/:5432\//:5434\//g'
 sed -i '' 's/localhost:9092/localhost:29092/g' .env 2>/dev/null || sed -i 's/localhost:9092/localhost:29092/g' .env 2>/dev/null || true
 
 # Sync .env to sub-services
-for dir in user-service market-data-service indicator-service setup-service alert-service backtest-service fundamentals-service api-gateway websocket-gateway frontend infra; do
+for dir in frontend infra; do
   if [ -d "$dir" ]; then
     cp .env "$dir/.env" 2>/dev/null || true
   fi
@@ -88,11 +88,9 @@ for i in {1..30}; do
 done
 echo -e "\n${GREEN}Infrastructure services are reachable!${NC}"
 
-# 4. Synchronize Database Schema & Seed Data
-echo -e "\n${BLUE}[3/4] Ensuring database schema and seeds are up-to-date...${NC}"
-DATABASE_URL="postgresql://parakh:parakh_secret@localhost:5434/parakh?schema=public" npx prisma db push --schema=user-service/prisma/schema.prisma --skip-generate >/dev/null 2>&1 || true
-DATABASE_URL="postgresql://parakh:parakh_secret@localhost:5434/parakh?schema=public" node user-service/seed.js >/dev/null 2>&1 || true
-echo -e "${GREEN}Database verified & default admin seeded (admin@parakh.com / password123).${NC}"
+# 4. Database Schema & Seed Verification
+echo -e "\n${BLUE}[3/4] Database migrations & seed handled automatically by Flyway and parakh-core.${NC}"
+echo -e "${GREEN}Default admin user: admin@parakh.com / password123${NC}"
 
 # 5. Launch All Services
 echo -e "\n${BLUE}[4/4] Launching consolidated Spring Boot services and frontend...${NC}"
