@@ -4,6 +4,7 @@ import {
   dispose,
   registerOverlay,
   Chart as KLineChart,
+  KLineData,
   OverlayCreate,
   OverlayMode,
   LineType,
@@ -152,11 +153,43 @@ const INDICATOR_LIST = [
   { id: 'KDJ', name: 'KDJ Stochastic Oscillator', subPane: true, color: '#FFD54F', desc: 'Fast/Slow stochastic price oscillator' },
 ];
 
+const isSameCandlePeriod = (firstTimestamp: number, secondTimestamp: number, resolution: string) => {
+  const first = new Date(firstTimestamp);
+  const second = new Date(secondTimestamp);
+  if (resolution === 'M') {
+    return first.getUTCFullYear() === second.getUTCFullYear() && first.getUTCMonth() === second.getUTCMonth();
+  }
+  if (resolution === 'W') {
+    const weekStart = (date: Date) => {
+      const copy = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+      copy.setUTCDate(copy.getUTCDate() - ((copy.getUTCDay() + 6) % 7));
+      return copy.getTime();
+    };
+    return weekStart(first) === weekStart(second);
+  }
+  if (resolution === 'D') {
+    return first.getUTCFullYear() === second.getUTCFullYear()
+      && first.getUTCMonth() === second.getUTCMonth()
+      && first.getUTCDate() === second.getUTCDate();
+  }
+  const seconds = Number(resolution) * 60;
+  return Math.floor(firstTimestamp / (seconds * 1000)) === Math.floor(secondTimestamp / (seconds * 1000));
+};
+
+const getCandleStart = (timestamp: number, resolution: string) => {
+  const seconds = Number(resolution) * 60;
+  if (!Number.isFinite(seconds) || seconds <= 0) return timestamp;
+  return Math.floor(timestamp / (seconds * 1000)) * seconds * 1000;
+};
+
 export default function Chart({ symbol }: ChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartCanvasAreaRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<KLineChart | null>(null);
+  const liveCandleRef = useRef<KLineData | null>(null);
+  const activeIndicatorsRef = useRef<string[]>(['VOL', 'MA']);
+  const autoOverlayIdsRef = useRef<string[]>([]);
 
   // States
   const [activeDrawing, setActiveDrawing] = useState<DrawingTool>('cursor');
@@ -174,13 +207,17 @@ export default function Chart({ symbol }: ChartProps) {
   const [isIndicatorsOpen, setIsIndicatorsOpen] = useState(false);
   const [isStyleOpen, setIsStyleOpen] = useState(false);
   const [indicatorSearch, setIndicatorSearch] = useState('');
+  const [annotationText, setAnnotationText] = useState('');
+  const [isAnnotationComposerOpen, setIsAnnotationComposerOpen] = useState(false);
 
   // Drawing modifiers
   const [isDrawingsLocked, setIsDrawingsLocked] = useState(false);
   const [isDrawingsVisible, setIsDrawingsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [orderToast, setOrderToast] = useState<{ type: 'BUY' | 'SELL'; price: number } | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [chartMessage, setChartMessage] = useState<string | null>(null);
+  const [levelToast, setLevelToast] = useState<{ type: 'BUY' | 'SELL'; price: number } | null>(null);
   // Track whether we're actively in drawing mode (waiting for user to place points)
   const [isInDrawingMode, setIsInDrawingMode] = useState(false);
   const activeOverlayIdRef = useRef<string | null>(null);
@@ -214,8 +251,8 @@ export default function Chart({ symbol }: ChartProps) {
       const deltaY = e.clientY - dragStartRef.current.startY;
 
       const bounds = chartCanvasAreaRef.current.getBoundingClientRect();
-      const maxX = Math.max(0, bounds.width - 290);
-      const maxY = Math.max(0, bounds.height - 48);
+      const maxX = Math.max(0, bounds.width - 430);
+      const maxY = Math.max(0, bounds.height - 65);
 
       const newX = Math.min(Math.max(8, dragStartRef.current.initX + deltaX), maxX);
       const newY = Math.min(Math.max(8, dragStartRef.current.initY + deltaY), maxY);
@@ -230,8 +267,8 @@ export default function Chart({ symbol }: ChartProps) {
       const deltaY = touch.clientY - dragStartRef.current.startY;
 
       const bounds = chartCanvasAreaRef.current.getBoundingClientRect();
-      const maxX = Math.max(0, bounds.width - 290);
-      const maxY = Math.max(0, bounds.height - 48);
+      const maxX = Math.max(0, bounds.width - 430);
+      const maxY = Math.max(0, bounds.height - 65);
 
       const newX = Math.min(Math.max(8, dragStartRef.current.initX + deltaX), maxX);
       const newY = Math.min(Math.max(8, dragStartRef.current.initY + deltaY), maxY);
@@ -267,7 +304,9 @@ export default function Chart({ symbol }: ChartProps) {
       }
 
       if (e.key === 'Escape') {
-        if (isInDrawingMode) {
+        if (isAnnotationComposerOpen) {
+          setIsAnnotationComposerOpen(false);
+        } else if (isInDrawingMode) {
           exitDrawingMode();
         } else if (selectedOverlay) {
           setSelectedOverlay(null);
@@ -279,7 +318,7 @@ export default function Chart({ symbol }: ChartProps) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isInDrawingMode, selectedOverlay]);
+  }, [isAnnotationComposerOpen, isInDrawingMode, selectedOverlay]);
 
   const handlePaletteMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -322,18 +361,20 @@ export default function Chart({ symbol }: ChartProps) {
   // Initialize and load historical data
   useEffect(() => {
     if (!chartRef.current || !symbol) return;
+    const chartElement = chartRef.current;
+    let cancelled = false;
 
     // Clean up any existing chart instance / DOM nodes before re-init
     try {
-      dispose(chartRef.current);
+      dispose(chartElement);
     } catch (_) { }
-    if (chartRef.current) {
-      chartRef.current.innerHTML = '';
-    }
+    chartElement.innerHTML = '';
 
     setIsLoading(true);
+    setChartMessage(null);
+    liveCandleRef.current = null;
 
-    const chart = init(chartRef.current, {
+    const chart = init(chartElement, {
       styles: {
         grid: {
           horizontal: { color: '#141823', size: 1 },
@@ -427,9 +468,16 @@ export default function Chart({ symbol }: ChartProps) {
 
     chartInstance.current = chart;
 
-    // Apply default main indicators
-    chart?.createIndicator('MA', false, { id: 'candle_pane' });
-    chart?.createIndicator('VOL', false, { id: 'pane_vol', height: 80 });
+    // Restore the operator's chosen indicators when a symbol or timeframe reloads.
+    activeIndicatorsRef.current.forEach((indicatorId) => {
+      const definition = INDICATOR_LIST.find((item) => item.id === indicatorId);
+      if (!definition) return;
+      chart?.createIndicator(
+        indicatorId,
+        false,
+        definition.subPane ? { id: `pane_${indicatorId.toLowerCase()}`, height: 90 } : { id: 'candle_pane' },
+      );
+    });
 
     // Track crosshair hover for live OHLC legend
     chart?.subscribeAction('onCrosshairChange' as any, (data: any) => {
@@ -451,7 +499,7 @@ export default function Chart({ symbol }: ChartProps) {
     // Fetch historical candles
     const fetchHistory = async () => {
       try {
-        const res = await api.getCandles(cleanSymbol, resolution, 0, 0);
+        const res = await api.getCandles(symbol, resolution, 0, 0);
         if (res && res.t && res.t.length > 0) {
           const kLineData = res.t.map((timestamp: number, i: number) => ({
             timestamp: timestamp * 1000,
@@ -462,10 +510,12 @@ export default function Chart({ symbol }: ChartProps) {
             volume: res.v[i],
           }));
 
+          if (cancelled) return;
           chart?.applyNewData(kLineData);
 
           const lastIndex = kLineData.length - 1;
           const latest = kLineData[lastIndex];
+          liveCandleRef.current = latest;
           const change = latest.close - latest.open;
           const changePct = latest.open ? (change / latest.open) * 100 : 0;
           setOhlc({
@@ -476,11 +526,14 @@ export default function Chart({ symbol }: ChartProps) {
             change,
             changePct,
           });
+        } else if (!cancelled) {
+          setChartMessage(`No chart data is currently available for ${cleanSymbol}. Try another timeframe or symbol.`);
         }
       } catch (err) {
         console.error('Failed to load historical data', err);
+        if (!cancelled) setChartMessage('Could not load chart data. Check the market data service and try again.');
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
@@ -490,16 +543,16 @@ export default function Chart({ symbol }: ChartProps) {
     window.addEventListener('resize', handleResize);
 
     return () => {
+      cancelled = true;
       window.removeEventListener('resize', handleResize);
       try {
-        if (chartRef.current) {
-          dispose(chartRef.current);
-          chartRef.current.innerHTML = '';
-        }
+        dispose(chartElement);
+        chartElement.innerHTML = '';
       } catch (_) { }
       chartInstance.current = null;
+      liveCandleRef.current = null;
     };
-  }, [symbol, resolution]);
+  }, [symbol, resolution, cleanSymbol, reloadNonce]);
 
   // Update chart style if user changes candles / line / area
   useEffect(() => {
@@ -515,16 +568,29 @@ export default function Chart({ symbol }: ChartProps) {
   // Update chart with live streaming price
   useEffect(() => {
     if (chartInstance.current && livePrice) {
-      chartInstance.current.updateData({
-        timestamp: livePrice.timestamp * 1000,
-        open: livePrice.price,
-        high: livePrice.price,
-        low: livePrice.price,
-        close: livePrice.price,
-        volume: livePrice.volume || 0,
-      });
+      const tickTimestamp = livePrice.timestamp * 1000;
+      const previous = liveCandleRef.current;
+      const continuingCandle = previous && isSameCandlePeriod(previous.timestamp, tickTimestamp, resolution);
+      const candle: KLineData = continuingCandle
+        ? {
+            ...previous,
+            high: Math.max(previous.high, livePrice.price),
+            low: Math.min(previous.low, livePrice.price),
+            close: livePrice.price,
+            volume: livePrice.volume ?? previous.volume,
+          }
+        : {
+            timestamp: getCandleStart(tickTimestamp, resolution),
+            open: previous?.close ?? livePrice.price,
+            high: livePrice.price,
+            low: livePrice.price,
+            close: livePrice.price,
+            volume: livePrice.volume ?? 0,
+          };
+      chartInstance.current.updateData(candle);
+      liveCandleRef.current = candle;
     }
-  }, [livePrice]);
+  }, [livePrice, resolution]);
 
   // Sync lock and visibility state with chart overlays
   useEffect(() => {
@@ -565,7 +631,14 @@ export default function Chart({ symbol }: ChartProps) {
     activeOverlayIdRef.current = null;
   };
 
-  const handleSelectDrawing = (tool: DrawingTool) => {
+  const handleSelectDrawing = (tool: DrawingTool, annotation?: string) => {
+    // An annotation needs text before it becomes a chart object. Opening a composer
+    // avoids the empty labels produced by the chart library's default annotation.
+    if (tool === 'simpleAnnotation' && annotation === undefined) {
+      exitDrawingMode();
+      setIsAnnotationComposerOpen(true);
+      return;
+    }
     // Clicking cursor always exits drawing mode
     if (tool === 'cursor') {
       exitDrawingMode();
@@ -615,6 +688,7 @@ export default function Chart({ symbol }: ChartProps) {
 
     const overlayConfig: OverlayCreate = {
       name: overlayName,
+      ...(tool === 'simpleAnnotation' ? { extendData: annotation?.trim() || 'Note' } : {}),
       lock: isDrawingsLocked,
       mode: OverlayMode.Normal,
       styles: {
@@ -695,6 +769,7 @@ export default function Chart({ symbol }: ChartProps) {
   const handleClearDrawings = () => {
     if (chartInstance.current) {
       chartInstance.current.removeOverlay();
+      autoOverlayIdsRef.current = [];
       setActiveDrawing('cursor');
       setIsInDrawingMode(false);
       setSelectedOverlay(null);
@@ -708,14 +783,18 @@ export default function Chart({ symbol }: ChartProps) {
 
     if (exists) {
       chartInstance.current.removeIndicator(isSubPane ? `pane_${id.toLowerCase()}` : 'candle_pane', id);
-      setActiveIndicators(activeIndicators.filter((i) => i !== id));
+      const next = activeIndicators.filter((item) => item !== id);
+      activeIndicatorsRef.current = next;
+      setActiveIndicators(next);
     } else {
       if (isSubPane) {
         chartInstance.current.createIndicator(id, false, { id: `pane_${id.toLowerCase()}`, height: 90 });
       } else {
         chartInstance.current.createIndicator(id, false, { id: 'candle_pane' });
       }
-      setActiveIndicators([...activeIndicators, id]);
+      const next = [...activeIndicators, id];
+      activeIndicatorsRef.current = next;
+      setActiveIndicators(next);
     }
   };
 
@@ -723,8 +802,18 @@ export default function Chart({ symbol }: ChartProps) {
   const handleAutoSupportResistance = async () => {
     if (!chartInstance.current) return;
     try {
-      const data = await api.getCandles(cleanSymbol, resolution, 0, 0);
-      if (!data || !data.c || data.c.length < 20) return;
+      setChartMessage(null);
+      const data = await api.getCandles(symbol, resolution, 0, 0);
+      if (!data || !data.c || data.c.length < 20) {
+        setChartMessage('Auto S/R needs at least 20 completed candles for this symbol and timeframe.');
+        return;
+      }
+
+      // Replace the previous generated levels instead of piling duplicate analysis on the chart.
+      for (const id of autoOverlayIdsRef.current) {
+        chartInstance.current.removeOverlay({ id });
+      }
+      autoOverlayIdsRef.current = [];
 
       const closes = data.c;
       const highs = data.h;
@@ -761,7 +850,7 @@ export default function Chart({ symbol }: ChartProps) {
       };
 
       // Resistance Level
-      chartInstance.current.createOverlay({
+      const resistanceId = chartInstance.current.createOverlay({
         name: 'horizontalStraightLine',
         points: [{ timestamp: data.t[data.t.length - 1] * 1000, value: highest }],
         styles: {
@@ -769,9 +858,10 @@ export default function Chart({ symbol }: ChartProps) {
         },
         ...autoSRCallbacks,
       });
+      if (typeof resistanceId === 'string') autoOverlayIdsRef.current.push(resistanceId);
 
       // Support Level
-      chartInstance.current.createOverlay({
+      const supportId = chartInstance.current.createOverlay({
         name: 'horizontalStraightLine',
         points: [{ timestamp: data.t[data.t.length - 1] * 1000, value: lowest }],
         styles: {
@@ -779,6 +869,7 @@ export default function Chart({ symbol }: ChartProps) {
         },
         ...autoSRCallbacks,
       });
+      if (typeof supportId === 'string') autoOverlayIdsRef.current.push(supportId);
 
       // Consolidation Breakout Box
       const boxStartTs = data.t[Math.max(0, data.t.length - 20)] * 1000;
@@ -786,7 +877,7 @@ export default function Chart({ symbol }: ChartProps) {
       const boxHigh = Math.max(...highs.slice(-20));
       const boxLow = Math.min(...lows.slice(-20));
 
-      chartInstance.current.createOverlay({
+      const boxId = chartInstance.current.createOverlay({
         name: 'rect',
         points: [
           { timestamp: boxStartTs, value: boxHigh },
@@ -802,8 +893,10 @@ export default function Chart({ symbol }: ChartProps) {
         },
         ...autoSRCallbacks,
       });
+      if (typeof boxId === 'string') autoOverlayIdsRef.current.push(boxId);
     } catch (err) {
       console.error('Auto S/R calculation error', err);
+      setChartMessage('Auto S/R could not analyze this market. Try again once candle data is available.');
     }
   };
 
@@ -817,11 +910,21 @@ export default function Chart({ symbol }: ChartProps) {
     }
   };
 
-  // Trigger quick order mock toast
-  const handleQuickOrder = (type: 'BUY' | 'SELL') => {
+  // This is an analysis platform, not a broker: these controls mark actionable levels,
+  // rather than implying that an order was sent or filled.
+  const handleQuickLevel = (type: 'BUY' | 'SELL') => {
     const price = ohlc.close || livePrice?.price || 310;
-    setOrderToast({ type, price });
-    setTimeout(() => setOrderToast(null), 3000);
+    const levelPrice = type === 'BUY' ? price * 1.0005 : price * 0.9995;
+    if (chartInstance.current) {
+      const id = chartInstance.current.createOverlay({
+        name: 'priceLine',
+        points: [{ timestamp: Date.now(), value: levelPrice }],
+        styles: { line: { color: type === 'BUY' ? '#089981' : '#F23645', size: 2, style: LineType.Dashed, dashedValue: [5, 4] } },
+      });
+      if (typeof id === 'string') setSelectedOverlay({ id, name: `${type.toLowerCase()} level` });
+    }
+    setLevelToast({ type, price: levelPrice });
+    window.setTimeout(() => setLevelToast(null), 3000);
   };
 
   const isUp = (ohlc.change ?? 0) >= 0;
@@ -841,25 +944,25 @@ export default function Chart({ symbol }: ChartProps) {
           1. TRADINGVIEW TOP NAVBAR (CANDLES, TIMEFRAME, INDICATORS)
           GENEROUS LEFT MARGIN (pl-6) FOR SPACED-OUT LAYOUT
       ───────────────────────────────────────────────────────────── */}
-      <header className="h-12 bg-[#10141E] border-b border-[#1A2230] flex items-center justify-between px-6 gap-3 z-40 text-xs overflow-visible">
+      <header className="relative z-50 !h-12 bg-[#10141E] border-b border-[#1A2230] flex items-center justify-between !px-3 sm:!px-4 gap-3 text-xs overflow-visible">
         {/* Left Section: Symbol, Timeframe dropdown, Chart Style, Indicators */}
-        <div className="flex items-center gap-2.5 h-full overflow-visible">
+        <div className="flex items-center gap-2 h-full overflow-visible">
           {/* Symbol & Exchange Badge */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[#161B26] hover:bg-[#1E2536] transition-colors rounded-md cursor-pointer border border-[#242C3D] mr-2 shadow-sm">
-            <span className="font-bold text-[#F0F4F8] tracking-wide text-[13px]">{cleanSymbol}</span>
-            <span className="text-[10px] px-1.5 py-0.5 bg-[#242C3D] text-[#787B86] font-mono rounded uppercase font-semibold">
+          <div className="flex items-center gap-2 !h-8 !px-2.5 !py-1 bg-[#161B26] hover:bg-[#1E2536] transition-colors rounded-md cursor-default border border-[#242C3D] !mr-1 shadow-sm whitespace-nowrap">
+            <span className="font-bold text-[#F0F4F8] tracking-wide text-xs">{cleanSymbol}</span>
+            <span className="text-[9px] !px-1.5 !py-0.2 bg-[#242C3D] text-[#787B86] font-mono rounded uppercase font-semibold">
               {exchange}
             </span>
           </div>
-          <div className="w-[1px] h-5 bg-[#1E2536] mx-1" />
+          <div className="w-[1px] h-4 bg-[#1E2536] mx-0.5" />
 
           {/* Quick Timeframes */}
-          <div className="flex items-center gap-1 dropdown-scope relative">
+          <div className="flex items-center gap-0.5 dropdown-scope relative">
             {['15', '60', 'D'].map((tf) => (
               <button
                 key={tf}
                 onClick={() => setResolution(tf)}
-                className={`px-3 py-1.5 rounded-md transition-all font-medium ${resolution === tf
+                className={`!h-8 !px-2.5 !py-1 flex items-center justify-center rounded-md transition-all font-medium whitespace-nowrap text-xs ${resolution === tf
                     ? 'text-[#2962FF] font-bold bg-[#2962FF]/15 border border-[#2962FF]/40 shadow-sm'
                     : 'text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#161B26]'
                   }`}
@@ -869,7 +972,7 @@ export default function Chart({ symbol }: ChartProps) {
             ))}
 
             {/* Timeframe Dropdown */}
-            <div className="relative">
+            <div className={`relative ${isTimeframeOpen ? 'z-50' : ''}`}>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -877,20 +980,20 @@ export default function Chart({ symbol }: ChartProps) {
                   setIsIndicatorsOpen(false);
                   setIsStyleOpen(false);
                 }}
-                className={`px-2 py-1.5 rounded-md text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#161B26] flex items-center transition-colors ${isTimeframeOpen ? 'bg-[#161B26] text-[#2962FF]' : ''
+                className={`!h-8 !px-1.5 !py-1 rounded-md text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#161B26] flex items-center justify-center transition-colors ${isTimeframeOpen ? 'bg-[#161B26] text-[#2962FF]' : ''
                   }`}
               >
-                <ChevronDown size={14} />
+                <ChevronDown size={13} />
               </button>
 
               {isTimeframeOpen && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute top-11 left-0 w-48 bg-[#121721] border border-[#242C3D] shadow-2xl rounded-lg py-2 z-50 animate-dropdown backdrop-blur-xl"
+                  className="absolute top-9 left-0 !w-44 bg-[#121721] border border-[#242C3D] shadow-2xl !rounded-lg !p-1 z-50 animate-dropdown backdrop-blur-xl"
                 >
                   {TIMEFRAMES.map((group) => (
-                    <div key={group.group} className="border-b border-[#1E2536] last:border-0 py-1">
-                      <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-[#787B86] font-semibold">
+                    <div key={group.group} className="border-b border-[#1E2536] last:border-0 !py-1">
+                      <div className="!px-2.5 !py-0.5 text-[9px] uppercase tracking-wider text-[#787B86] font-semibold font-mono">
                         {group.group}
                       </div>
                       {group.items.map((item) => (
@@ -900,14 +1003,13 @@ export default function Chart({ symbol }: ChartProps) {
                             setResolution(item.value);
                             setIsTimeframeOpen(false);
                           }}
-                          className={`px-3 py-1.5 text-xs cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors ${resolution === item.value ? 'text-[#2962FF] font-bold bg-[#2962FF]/10' : 'text-[#D1D4DC]'
+                          className={`!px-2.5 !py-1.5 text-xs cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors !rounded-md !my-0.5 ${resolution === item.value ? 'text-[#2962FF] font-bold bg-[#2962FF]/15' : 'text-[#D1D4DC]'
                             }`}
                         >
                           <div className="flex flex-col">
-                            <span>{item.label}</span>
-                            <span className="text-[10px] text-[#787B86]">{item.desc}</span>
+                            <span className="font-medium">{item.label}</span>
                           </div>
-                          {resolution === item.value && <Check size={14} className="text-[#2962FF]" />}
+                          {resolution === item.value && <Check size={13} className="text-[#2962FF] flex-shrink-0" />}
                         </div>
                       ))}
                     </div>
@@ -917,10 +1019,10 @@ export default function Chart({ symbol }: ChartProps) {
             </div>
           </div>
 
-          <div className="w-[1px] h-5 bg-[#1E2536] mx-1" />
+          <div className="w-[1px] h-4 bg-[#1E2536] mx-0.5" />
 
           {/* Chart Style Dropdown */}
-          <div className="relative dropdown-scope">
+          <div className={`relative dropdown-scope ${isStyleOpen ? 'z-50' : ''}`}>
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -928,17 +1030,18 @@ export default function Chart({ symbol }: ChartProps) {
                 setIsTimeframeOpen(false);
                 setIsIndicatorsOpen(false);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[#D1D4DC] hover:bg-[#161B26] transition-colors border border-transparent hover:border-[#242C3D]"
+              className={`flex items-center gap-1.5 !h-8 !px-2.5 !py-1 rounded-md text-[#D1D4DC] hover:bg-[#161B26] transition-colors border border-transparent hover:border-[#242C3D] whitespace-nowrap text-xs ${isStyleOpen ? 'bg-[#161B26] border-[#242C3D]' : ''
+                }`}
             >
-              <BarChart2 size={16} className="text-[#2962FF]" />
+              <BarChart2 size={15} className="text-[#2962FF]" />
               <span className="capitalize font-medium">{chartType === 'candle_solid' ? 'Candles' : chartType}</span>
-              <ChevronDown size={13} className="text-[#787B86]" />
+              <ChevronDown size={12} className="text-[#787B86]" />
             </button>
 
             {isStyleOpen && (
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="absolute top-11 left-0 w-40 bg-[#121721] border border-[#242C3D] shadow-2xl rounded-lg py-2 z-50 animate-dropdown backdrop-blur-xl"
+                className="absolute top-9 left-0 !w-38 bg-[#121721] border border-[#242C3D] shadow-2xl !rounded-lg !p-1.5 z-50 animate-dropdown backdrop-blur-xl"
               >
                 {[
                   { label: 'Candles', value: 'candle_solid', icon: BarChart2 },
@@ -951,24 +1054,24 @@ export default function Chart({ symbol }: ChartProps) {
                       setChartType(st.value as any);
                       setIsStyleOpen(false);
                     }}
-                    className={`px-3 py-1.5 text-xs cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors ${chartType === st.value ? 'text-[#2962FF] font-bold bg-[#2962FF]/10' : 'text-[#D1D4DC]'
+                    className={`!px-2.5 !py-1.5 text-xs cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors !rounded-md !my-0.5 ${chartType === st.value ? 'text-[#2962FF] font-bold bg-[#2962FF]/15' : 'text-[#D1D4DC]'
                       }`}
                   >
                     <div className="flex items-center gap-2">
-                      <st.icon size={15} className={chartType === st.value ? 'text-[#2962FF]' : 'text-[#787B86]'} />
-                      <span>{st.label}</span>
+                      <st.icon size={14} className={chartType === st.value ? 'text-[#2962FF]' : 'text-[#787B86]'} />
+                      <span className="font-medium">{st.label}</span>
                     </div>
-                    {chartType === st.value && <Check size={13} className="text-[#2962FF]" />}
+                    {chartType === st.value && <Check size={13} className="text-[#2962FF] flex-shrink-0" />}
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="w-[1px] h-5 bg-[#1E2536] mx-1" />
+          <div className="w-[1px] h-4 bg-[#1E2536] mx-0.5" />
 
           {/* Indicators Dropdown */}
-          <div className="relative dropdown-scope">
+          <div className={`relative dropdown-scope ${isIndicatorsOpen ? 'z-50' : ''}`}>
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -976,102 +1079,98 @@ export default function Chart({ symbol }: ChartProps) {
                 setIsTimeframeOpen(false);
                 setIsStyleOpen(false);
               }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[#D1D4DC] hover:bg-[#161B26] transition-colors border border-transparent hover:border-[#242C3D] ${isIndicatorsOpen ? 'bg-[#161B26] border-[#242C3D]' : ''
+              className={`flex items-center gap-1.5 !h-8 !px-2.5 !py-1 rounded-md text-[#D1D4DC] hover:bg-[#161B26] transition-colors border border-transparent hover:border-[#242C3D] whitespace-nowrap text-xs ${isIndicatorsOpen ? 'bg-[#161B26] border-[#242C3D]' : ''
                 }`}
             >
-              <Activity size={16} className="text-[#00E676]" />
-              <span className="font-semibold">Indicators</span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-[#242C3D] text-[#787B86] rounded-full font-mono font-bold">
+              <Activity size={15} className="text-[#00E676]" />
+              <span className="font-medium">Indicators</span>
+              <span className="min-w-4.5 !h-4.5 !px-1 flex items-center justify-center text-[9px] bg-[#242C3D] text-[#D1D4DC] rounded-full font-mono font-bold leading-none">
                 {activeIndicators.length}
               </span>
-              <ChevronDown size={13} className="text-[#787B86]" />
+              <ChevronDown size={12} className="text-[#787B86]" />
             </button>
 
             {isIndicatorsOpen && (
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="absolute top-11 left-0 w-84 bg-[#121721] border border-[#242C3D] shadow-2xl rounded-lg p-3 z-50 animate-dropdown backdrop-blur-2xl"
+                className="absolute top-9 left-0 !w-[290px] max-w-[90vw] bg-[#121721] border border-[#242C3D] shadow-2xl !rounded-lg !p-2 z-50 animate-dropdown backdrop-blur-2xl"
               >
                 {/* Search Bar inside indicator dropdown */}
-                <div className="relative mb-2.5">
-                  <Search size={14} className="absolute left-2.5 top-2.5 text-[#787B86]" />
+                <div className="relative !mb-2">
+                  <Search size={13} className="absolute left-2.5 top-2 text-[#787B86]" />
                   <input
                     type="text"
                     placeholder="Search indicators..."
                     value={indicatorSearch}
                     onChange={(e) => setIndicatorSearch(e.target.value)}
-                    className="w-full bg-[#1A2230] border border-[#242C3D] rounded-md pl-8 pr-8 py-2 text-xs text-[#F0F4F8] focus:border-[#2962FF]"
+                    className="w-full !h-7.5 bg-[#1A2230] border border-[#242C3D] !rounded-md !pl-7.5 !pr-7 !py-1 text-xs text-[#F0F4F8] focus:border-[#2962FF]"
                     autoFocus
                   />
                   {indicatorSearch && (
                     <button
                       onClick={() => setIndicatorSearch('')}
-                      className="absolute right-2.5 top-2 text-[#787B86] hover:text-white"
+                      className="absolute right-2 top-1.5 !p-0.5 text-[#787B86] hover:text-white"
                     >
-                      <X size={13} />
+                      <X size={12} />
                     </button>
                   )}
                 </div>
 
-                <div className="max-h-72 overflow-y-auto pr-1 space-y-1">
+                <div className="!max-h-60 overflow-y-auto !pr-1 !space-y-0.5">
                   {filteredIndicators.map((ind) => {
                     const isActive = activeIndicators.includes(ind.id);
                     return (
                       <div
                         key={ind.id}
                         onClick={() => toggleIndicator(ind.id, ind.subPane)}
-                        className={`p-2.5 rounded-md cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors ${isActive ? 'bg-[#2962FF]/10 text-[#F0F4F8]' : 'text-[#787B86]'
+                        className={`!px-2.5 !py-1.5 !rounded-md !my-0.5 cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors ${isActive ? 'bg-[#2962FF]/15 text-[#F0F4F8]' : 'text-[#787B86]'
                           }`}
                       >
-                        <div className="flex items-start gap-2.5">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full mt-0.5 flex-shrink-0"
-                            style={{ backgroundColor: ind.color }}
-                          />
+                        <div className="flex items-start gap-2">
                           <div className="flex flex-col">
                             <span className="font-medium text-xs text-[#F0F4F8]">{ind.name}</span>
                             <span className="text-[10px] text-[#787B86]">{ind.desc}</span>
                           </div>
                         </div>
                         {isActive ? (
-                          <Check size={15} className="text-[#2962FF] flex-shrink-0" />
+                          <Check size={13} className="text-[#2962FF] flex-shrink-0" />
                         ) : (
-                          <Plus size={14} className="text-[#787B86] hover:text-white flex-shrink-0" />
+                          <Plus size={13} className="text-[#787B86] hover:text-white flex-shrink-0" />
                         )}
                       </div>
                     );
                   })}
                   {filteredIndicators.length === 0 && (
-                    <div className="py-4 text-center text-xs text-[#787B86]">No indicators found.</div>
+                    <div className="!py-4 text-center text-xs text-[#787B86]">No indicators found.</div>
                   )}
                 </div>
               </div>
             )}
           </div>
 
-          <div className="w-[1px] h-5 bg-[#1E2536] mx-1" />
+          <div className="w-[1px] h-4 bg-[#1E2536] mx-0.5" />
 
           {/* Auto Support & Resistance Button */}
           <button
             onClick={handleAutoSupportResistance}
             title="Auto-detect Breakouts and Key Support/Resistance Levels"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-[#A855F7]/15 to-[#2962FF]/15 hover:from-[#A855F7]/25 hover:to-[#2962FF]/25 text-[#A855F7] border border-[#A855F7]/35 rounded-md transition-all font-semibold shadow-sm hover:shadow-[#A855F7]/20"
+            className="flex items-center gap-1.5 !h-8 !px-2.5 !py-1 bg-gradient-to-r from-[#A855F7]/15 to-[#2962FF]/15 hover:from-[#A855F7]/25 hover:to-[#2962FF]/25 text-[#A855F7] border border-[#A855F7]/35 rounded-md transition-all text-xs font-bold tracking-wider shadow-sm hover:shadow-[#A855F7]/20 whitespace-nowrap"
           >
-            <Sparkles size={14} className="text-[#A855F7] animate-pulse" />
+            <Sparkles size={13} className="text-[#A855F7] animate-pulse" />
             <span>AUTO S/R</span>
           </button>
         </div>
 
         {/* Right Section: Fullscreen & Status */}
-        <div className="flex items-center gap-2">
-          {isLoading && <RefreshCw size={13} className="text-[#2962FF] animate-spin" />}
+        <div className="flex items-center gap-1.5">
+          {isLoading && <RefreshCw size={12} className="text-[#2962FF] animate-spin" />}
 
           <button
             onClick={toggleFullscreen}
             title="Toggle Fullscreen"
-            className="p-2 rounded-md text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#161B26] transition-colors"
+            className="!h-8 !w-8 !p-1.5 flex items-center justify-center rounded-md text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#161B26] transition-colors"
           >
-            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
         </div>
       </header>
@@ -1079,9 +1178,9 @@ export default function Chart({ symbol }: ChartProps) {
       {/* ─────────────────────────────────────────────────────────────
           2. MAIN WORKSPACE: LEFT RAIL + (SUB-HEADER & CHART CANVAS)
       ───────────────────────────────────────────────────────────── */}
-      <div className="relative flex-1 w-full h-full flex overflow-hidden">
+      <div className="relative z-10 flex-1 w-full h-full flex overflow-hidden">
         {/* Left Drawing Sidebar (ENLARGED ICONS & GENEROUS MARGINS) */}
-        <aside className="w-16 bg-[#10141E] border-r border-[#1A2230] flex flex-col items-center py-4 px-2 gap-2 z-20 shadow-md">
+        <aside className="w-16 bg-[#10141E] border-r border-[#1A2230] flex flex-col items-center !py-4 px-2 gap-2 z-20 shadow-md">
           {/* Pointer / Cursor */}
           <button
             onClick={() => handleSelectDrawing('cursor')}
@@ -1212,25 +1311,30 @@ export default function Chart({ symbol }: ChartProps) {
         </aside>
 
         {/* Right Section: Sub-header + Chart Canvas Column */}
-        <div className="px-10 flex-1 h-full flex flex-col min-w-0">
+        <div className="px-4 sm:px-7 flex-1 h-full flex flex-col min-w-0">
           {/* Stock Info Row (Sub-Header) with Generous Margin */}
-          <div className="h-11 bg-[#0E121B] border-b border-[#1A2230] flex items-center justify-between px-6 py-1.5 gap-4 text-xs font-mono z-20">
+          <div className="!h-11 sm:!h-12 bg-[#0E121B] border-b border-[#1A2230] flex items-center justify-between !px-3 sm:!px-4 !py-1.5 gap-3 text-xs font-mono z-20">
             {/* Symbol Title & Live OHLC stats with distinct badge padding */}
-            <div className="flex items-center gap-3.5 overflow-x-auto no-scrollbar">
-              <div className="flex items-center gap-2 px-3 py-1 bg-[#141923] border border-[#1E2536] rounded-md flex-shrink-0">
-                <span className="w-2 h-2 rounded-full bg-[#089981] animate-pulse" />
+            <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar">
+              <div className="flex items-center gap-2 !h-8 !px-2.5 !py-1 bg-[#141923] border border-[#1E2536] rounded-md flex-shrink-0 text-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#089981] animate-pulse flex-shrink-0" />
                 <span className="text-[#F0F4F8] font-bold tracking-wide">{cleanSymbol}</span>
-                <span className="text-[#787B86] text-[11px]">· {resolution} · {exchange}</span>
+                <span className="text-[#787B86] text-[10px] flex items-center gap-1">
+                  <span>·</span>
+                  <span>{resolution}</span>
+                  <span>·</span>
+                  <span>{exchange}</span>
+                </span>
               </div>
 
-              <div className="flex items-center gap-3.5 px-3 py-1 bg-[#141923]/60 border border-[#1E2536] rounded-md text-[11px] flex-shrink-0">
-                <span>O <strong className="text-[#F0F4F8] font-medium">{ohlc.open?.toFixed(2) ?? '—'}</strong></span>
-                <span>H <strong className="text-[#F0F4F8] font-medium">{ohlc.high?.toFixed(2) ?? '—'}</strong></span>
-                <span>L <strong className="text-[#F0F4F8] font-medium">{ohlc.low?.toFixed(2) ?? '—'}</strong></span>
-                <span>C <strong className="text-[#F0F4F8] font-medium">{ohlc.close?.toFixed(2) ?? '—'}</strong></span>
+              <div className="flex items-center gap-2.5 !h-8 !px-2.5 !py-1 bg-[#141923]/60 border border-[#1E2536] rounded-md text-xs flex-shrink-0">
+                <span className="flex items-center gap-1"><span className="text-[#787B86] font-semibold text-[11px]">O</span> <strong className="text-[#F0F4F8] font-medium">{ohlc.open?.toFixed(2) ?? '—'}</strong></span>
+                <span className="flex items-center gap-1"><span className="text-[#787B86] font-semibold text-[11px]">H</span> <strong className="text-[#F0F4F8] font-medium">{ohlc.high?.toFixed(2) ?? '—'}</strong></span>
+                <span className="flex items-center gap-1"><span className="text-[#787B86] font-semibold text-[11px]">L</span> <strong className="text-[#F0F4F8] font-medium">{ohlc.low?.toFixed(2) ?? '—'}</strong></span>
+                <span className="flex items-center gap-1"><span className="text-[#787B86] font-semibold text-[11px]">C</span> <strong className="text-[#F0F4F8] font-medium">{ohlc.close?.toFixed(2) ?? '—'}</strong></span>
                 {ohlc.change != null && (
                   <span
-                    className={`font-bold px-2 py-0.5 rounded text-[11px] ${isUp ? 'text-[#089981] bg-[#089981]/15' : 'text-[#F23645] bg-[#F23645]/15'
+                    className={`font-bold !px-2 !py-0.5 rounded text-[11px] tracking-tight flex items-center ${isUp ? 'text-[#089981] bg-[#089981]/15 border border-[#089981]/30' : 'text-[#F23645] bg-[#F23645]/15 border border-[#F23645]/30'
                       }`}
                   >
                     {isUp ? '+' : ''}
@@ -1241,21 +1345,23 @@ export default function Chart({ symbol }: ChartProps) {
               </div>
             </div>
 
-            {/* Buy / Sell Quick Execution Badges */}
-            <div className="flex items-center gap-2 flex-shrink-0 pr-2">
+            {/* Analysis levels — this terminal does not execute broker orders. */}
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button
-                onClick={() => handleQuickOrder('SELL')}
-                className="flex items-center bg-[#F23645]/15 hover:bg-[#F23645]/25 border border-[#F23645]/40 rounded-md px-3 py-1 text-[11px] font-mono transition-colors"
+                onClick={() => handleQuickLevel('SELL')}
+                title="Mark a sell reference level on the chart"
+                className="!h-8 !px-2.5 !py-1 flex items-center gap-1.5 bg-[#F23645]/15 hover:bg-[#F23645]/25 border border-[#F23645]/40 rounded-md text-xs font-mono transition-all whitespace-nowrap shadow-sm hover:shadow-[#F23645]/15"
               >
-                <span className="text-[#F23645] font-bold mr-2">${((ohlc.close ?? 310) * 0.9995).toFixed(2)}</span>
-                <span className="text-[#787B86] text-[9px] font-bold">SELL</span>
+                <span className="text-[#F23645] font-bold text-xs">${((ohlc.close ?? 310) * 0.9995).toFixed(2)}</span>
+                <span className="text-[#E0E3EB] text-[9px] font-bold tracking-wider">MARK SELL</span>
               </button>
               <button
-                onClick={() => handleQuickOrder('BUY')}
-                className="flex items-center bg-[#089981]/15 hover:bg-[#089981]/25 border border-[#089981]/40 rounded-md px-3 py-1 text-[11px] font-mono transition-colors"
+                onClick={() => handleQuickLevel('BUY')}
+                title="Mark a buy reference level on the chart"
+                className="!h-8 !px-2.5 !py-1 flex items-center gap-1.5 bg-[#089981]/15 hover:bg-[#089981]/25 border border-[#089981]/40 rounded-md text-xs font-mono transition-all whitespace-nowrap shadow-sm hover:shadow-[#089981]/15"
               >
-                <span className="text-[#089981] font-bold mr-2">${((ohlc.close ?? 310) * 1.0005).toFixed(2)}</span>
-                <span className="text-[#787B86] text-[9px] font-bold">BUY</span>
+                <span className="text-[#089981] font-bold text-xs">${((ohlc.close ?? 310) * 1.0005).toFixed(2)}</span>
+                <span className="text-[#E0E3EB] text-[9px] font-bold tracking-wider">MARK BUY</span>
               </button>
             </div>
           </div>
@@ -1266,12 +1372,24 @@ export default function Chart({ symbol }: ChartProps) {
           <div ref={chartCanvasAreaRef} className="flex-1 w-full h-full relative overflow-hidden">
             <div ref={chartRef} className="w-full h-full" />
 
+            {chartMessage && (
+              <div className="absolute inset-0 z-30 grid place-items-center bg-[#0B0E14]/85 p-6 text-center backdrop-blur-[2px]">
+                <div className="max-w-sm border border-[#242C3D] bg-[#121721] px-5 py-4 shadow-2xl">
+                  <strong className="block text-sm text-[#F0F4F8]">Chart data unavailable</strong>
+                  <p className="mt-2 text-xs leading-5 text-[#787B86]">{chartMessage}</p>
+                  <button onClick={() => setReloadNonce((current) => current + 1)} className="mt-4 border border-[#2962FF]/50 bg-[#2962FF]/10 px-3 py-1.5 text-xs font-semibold text-[#8BA8FF] hover:bg-[#2962FF]/20">
+                    Try again
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* 🎯 Draggable Favorites Toolbar (Movable across the chart area) */}
             <div
               style={{
                 transform: `translate3d(${palettePos.x}px, ${palettePos.y}px, 0)`,
               }}
-              className={`absolute top-0 left-0 flex items-center bg-[#121721]/95 backdrop-blur-md border border-[#242C3D] shadow-2xl rounded-lg px-2 py-1.5 gap-1.5 z-20 transition-shadow ${isDraggingPalette
+              className={`absolute top-0 left-0 flex items-center bg-[#121721]/95 backdrop-blur-md border border-[#242C3D] shadow-2xl !rounded-xl !px-4 !py-2.5 !gap-2.5 !m-1.5 z-20 transition-shadow ${isDraggingPalette
                   ? 'shadow-2xl shadow-[#2962FF]/20 border-[#2962FF] cursor-grabbing ring-1 ring-[#2962FF]/50'
                   : 'cursor-default'
                 }`}
@@ -1281,10 +1399,10 @@ export default function Chart({ symbol }: ChartProps) {
                 onMouseDown={handlePaletteMouseDown}
                 onTouchStart={handlePaletteTouchStart}
                 title="Drag toolbar anywhere across chart"
-                className="flex items-center gap-1 cursor-grab active:cursor-grabbing px-1 py-0.5 text-[#787B86] hover:text-[#F0F4F8] select-none group border-r border-[#242C3D] mr-0.5"
+                className="flex items-center !gap-1.5 cursor-grab active:cursor-grabbing !px-2 !py-1 text-[#787B86] hover:text-[#F0F4F8] select-none group border-r border-[#242C3D] !mr-1.5"
               >
-                <GripVertical size={14} className="text-[#787B86] group-hover:text-[#2962FF] transition-colors" />
-                <span className="text-[10px] font-mono font-bold tracking-wider hidden sm:inline text-[#787B86] group-hover:text-[#F0F4F8]">
+                <GripVertical size={18} className="text-[#787B86] group-hover:text-[#2962FF] transition-colors" />
+                <span className="!text-xs font-mono font-bold tracking-wider hidden sm:inline text-[#787B86] group-hover:text-[#F0F4F8]">
                   FAVORITES
                 </span>
               </div>
@@ -1293,48 +1411,48 @@ export default function Chart({ symbol }: ChartProps) {
               <button
                 onClick={() => handleSelectDrawing('segment')}
                 title="Trend Line"
-                className={`p-1.5 rounded hover:text-[#2962FF] hover:bg-[#2962FF]/10 transition-all ${activeDrawing === 'segment' ? 'text-[#2962FF] bg-[#2962FF]/15' : 'text-[#787B86]'
+                className={`!w-9 !h-9 flex items-center justify-center !p-2 !rounded-lg !mx-0.5 hover:text-[#2962FF] hover:bg-[#2962FF]/10 transition-all ${activeDrawing === 'segment' ? 'text-[#2962FF] bg-[#2962FF]/15' : 'text-[#787B86]'
                   }`}
               >
-                <TrendingUp size={15} />
+                <TrendingUp size={20} />
               </button>
               <button
                 onClick={() => handleSelectDrawing('rect')}
                 title="Support/Resistance Breakout Box"
-                className={`p-1.5 rounded hover:text-[#A855F7] hover:bg-[#A855F7]/10 transition-all ${activeDrawing === 'rect' ? 'text-[#A855F7] bg-[#A855F7]/15' : 'text-[#787B86]'
+                className={`!w-9 !h-9 flex items-center justify-center !p-2 !rounded-lg !mx-0.5 hover:text-[#A855F7] hover:bg-[#A855F7]/10 transition-all ${activeDrawing === 'rect' ? 'text-[#A855F7] bg-[#A855F7]/15' : 'text-[#787B86]'
                   }`}
               >
-                <Square size={15} />
+                <Square size={20} />
               </button>
               <button
                 onClick={() => handleSelectDrawing('horizontalStraightLine')}
                 title="Horizontal Support/Resistance"
-                className={`p-1.5 rounded hover:text-[#089981] hover:bg-[#089981]/10 transition-all ${activeDrawing === 'horizontalStraightLine' ? 'text-[#089981] bg-[#089981]/15' : 'text-[#787B86]'}`}
+                className={`!w-9 !h-9 flex items-center justify-center !p-2 !rounded-lg !mx-0.5 hover:text-[#089981] hover:bg-[#089981]/10 transition-all ${activeDrawing === 'horizontalStraightLine' ? 'text-[#089981] bg-[#089981]/15' : 'text-[#787B86]'}`}
               >
-                <Minus size={15} />
+                <Minus size={20} />
               </button>
               <button
                 onClick={() => handleSelectDrawing('fibonacciLine')}
                 title="Fibonacci Retracement"
-                className={`p-1.5 rounded hover:text-[#FF9800] hover:bg-[#FF9800]/10 transition-all ${activeDrawing === 'fibonacciLine' ? 'text-[#FF9800] bg-[#FF9800]/15' : 'text-[#787B86]'
+                className={`!w-9 !h-9 flex items-center justify-center !p-2 !rounded-lg !mx-0.5 hover:text-[#FF9800] hover:bg-[#FF9800]/10 transition-all ${activeDrawing === 'fibonacciLine' ? 'text-[#FF9800] bg-[#FF9800]/15' : 'text-[#787B86]'
                   }`}
               >
-                <Layers size={15} />
+                <Layers size={20} />
               </button>
               <button
                 onClick={handleAutoSupportResistance}
                 title="Auto S/R Detection"
-                className="p-1.5 rounded text-[#A855F7] hover:bg-[#A855F7]/15 transition-all"
+                className="!w-9 !h-9 flex items-center justify-center !p-2 !rounded-lg !mx-0.5 text-[#A855F7] hover:bg-[#A855F7]/15 transition-all"
               >
-                <Sparkles size={15} />
+                <Sparkles size={20} />
               </button>
-              <div className="w-[1px] h-3.5 bg-[#242C3D]" />
+              <div className="w-[1px] !h-6 bg-[#242C3D] !mx-1.5" />
               <button
                 onClick={handleClearDrawings}
                 title="Clear All"
-                className="p-1.5 rounded text-[#787B86] hover:text-[#F23645] hover:bg-[#F23645]/15 transition-all"
+                className="!w-9 !h-9 flex items-center justify-center !p-2 !rounded-lg !mx-0.5 text-[#787B86] hover:text-[#F23645] hover:bg-[#F23645]/15 transition-all"
               >
-                <Trash2 size={15} />
+                <Trash2 size={20} />
               </button>
             </div>
             {/* Active Drawing Mode Pill */}
@@ -1349,9 +1467,39 @@ export default function Chart({ symbol }: ChartProps) {
               </div>
             )}
 
+            {isAnnotationComposerOpen && (
+              <div className="absolute inset-0 z-40 grid place-items-center bg-[#0B0E14]/60 p-5 backdrop-blur-[2px]">
+                <form
+                  className="w-full max-w-sm border border-[#34415A] bg-[#121721] p-4 shadow-2xl"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    setIsAnnotationComposerOpen(false);
+                    handleSelectDrawing('simpleAnnotation', annotationText);
+                    setAnnotationText('');
+                  }}
+                >
+                  <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-[#8A9AB5]" htmlFor="annotation-text">Annotation text</label>
+                  <input
+                    id="annotation-text"
+                    value={annotationText}
+                    onChange={(event) => setAnnotationText(event.target.value)}
+                    placeholder="e.g. Breakout confirmation"
+                    maxLength={80}
+                    autoFocus
+                    className="mt-2 w-full border border-[#34415A] bg-[#0B0E14] !px-3 !py-2 text-sm text-[#F0F4F8] outline-none focus:border-[#2962FF]"
+                  />
+                  <p className="mt-2 text-[11px] leading-4 text-[#787B86]">Place the label with one click on the chart. Escape cancels an active drawing.</p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button type="button" onClick={() => setIsAnnotationComposerOpen(false)} className="border border-[#34415A] px-3 py-1.5 text-xs font-semibold text-[#AAB6CC] hover:bg-[#1A2230]">Cancel</button>
+                    <button type="submit" className="border border-[#2962FF] bg-[#2962FF] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1E4BD8]">Place note</button>
+                  </div>
+                </form>
+              </div>
+            )}
+
             {/* 🎯 Contextual Floating Toolbar for Selected Drawing */}
             {selectedOverlay && !isInDrawingMode && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center bg-[#121721]/95 backdrop-blur-xl border border-[#2962FF]/60 shadow-2xl rounded-lg px-3 py-1.5 gap-2.5 z-30 animate-dropdown ring-1 ring-[#2962FF]/30">
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center bg-[#121721]/95 backdrop-blur-xl border border-[#2962FF]/60 shadow-2xl !rounded-xl !px-3.5 !py-2 gap-3 z-30 animate-dropdown ring-1 ring-[#2962FF]/30">
                 <div className="flex items-center gap-1.5 text-xs font-mono text-[#F0F4F8]">
                   <span className="w-2 h-2 rounded-full bg-[#00E676] animate-pulse" />
                   <span className="font-semibold uppercase tracking-wide">
@@ -1366,7 +1514,7 @@ export default function Chart({ symbol }: ChartProps) {
                 <button
                   onClick={handleDeleteSelectedOverlay}
                   title="Delete Selected Drawing (Del / Backspace)"
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#F23645]/15 hover:bg-[#F23645]/25 text-[#F23645] border border-[#F23645]/40 text-xs font-semibold transition-all hover:scale-105 cursor-pointer"
+                  className="flex items-center gap-1.5 !px-3 !py-1.5 !rounded-lg bg-[#F23645]/15 hover:bg-[#F23645]/25 text-[#F23645] border border-[#F23645]/40 text-xs font-semibold transition-all hover:scale-105 cursor-pointer"
                 >
                   <Trash2 size={13} />
                   <span>Delete Shape</span>
@@ -1376,23 +1524,23 @@ export default function Chart({ symbol }: ChartProps) {
                 <button
                   onClick={() => setSelectedOverlay(null)}
                   title="Deselect (Esc)"
-                  className="p-1 rounded text-[#787B86] hover:text-white hover:bg-[#1A2230] transition-colors ml-0.5 cursor-pointer"
+                  className="!p-1.5 !rounded-lg text-[#787B86] hover:text-white hover:bg-[#1A2230] transition-colors ml-0.5 cursor-pointer"
                 >
                   <X size={13} />
                 </button>
               </div>
             )}
 
-            {/* Quick Order Simulated Toast */}
-            {orderToast && (
+            {/* Analysis level confirmation */}
+            {levelToast && (
               <div
-                className={`absolute top-14 right-6 px-4 py-2.5 rounded-lg border shadow-2xl backdrop-blur-md z-20 text-xs font-mono animate-dropdown flex items-center gap-2 ${orderToast.type === 'BUY'
+                className={`absolute top-14 right-6 !px-4 !py-2.5 !rounded-xl border shadow-2xl backdrop-blur-md z-20 text-xs font-mono animate-dropdown flex items-center gap-2 ${levelToast.type === 'BUY'
                     ? 'bg-[#089981]/20 border-[#089981] text-[#089981]'
                     : 'bg-[#F23645]/20 border-[#F23645] text-[#F23645]'
                   }`}
               >
-                <span className="font-bold">{orderToast.type} ORDER FILLED</span>
-                <span>@ ${orderToast.price.toFixed(2)}</span>
+                <span className="font-bold">{levelToast.type} LEVEL MARKED</span>
+                <span>@ ${levelToast.price.toFixed(2)}</span>
               </div>
             )}
           </div>
