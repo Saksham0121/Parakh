@@ -21,81 +21,57 @@ This is an educational/personal-use tool, not a trading execution platform — n
 
 ---
 
-## 2. Tech Stack (final)
+## 2. Tech Stack (Production Implementation)
 
 ### Backend
-- **Node.js + NestJS** (TypeScript) — all services, **polyrepo** (each service its own repo, no monorepo tooling)
-- **`@parakh/common`** — shared DTOs, Kafka client wrapper, logger config, published as a private npm package (GitHub Packages), versioned independently per service
+- **Java 21 LTS + Spring Boot 3.4.x** — multi-module Maven project (`backend/`)
+  - **`parakh-common`**: Shared domain models, DTOs, and utility constants
+  - **`parakh-core`** (Port 8080): API Gateway, JWT Authentication, Watchlist Management, Setup CRUD, and Alert Subscriptions
+  - **`parakh-engine`** (Port 8082): Real-time Market Data Ingestion, Yahoo Finance Client, Candlestick History, Technical Indicator Engine, and Historical Backtest Simulation
 
 ### Real-time / Streaming
-- **Apache Kafka** (via KafkaJS) — event backbone (price ticks, indicator updates, alert triggers, notification jobs, backtest jobs — single broker)
-- **Socket.IO** — WebSocket gateway to clients, with **Redis adapter** for cross-instance pub/sub
+- **Apache Kafka (KRaft mode)** — high-throughput event backbone for streaming ticks and alerts
+- **WebSockets / REST** — bi-directional push and low-latency market updates
 
-### Databases
-- **PostgreSQL** — users, watchlists, setups, order rules, alert history, fundamentals, backtest results
-- **TimescaleDB** — time-series price & indicator history (hypertables for native time-based partitioning)
-- **Redis** — cache (latest prices, indicators, fundamentals snapshots), Socket.IO adapter backend
-- **PgBouncer** — connection pooling, read/write routing once read replicas are added
+### Databases & Caching
+- **PostgreSQL 16** (Port 5434) — relational storage for users, setups, order rules, and watchlists (Flyway / JPA migrations)
+- **TimescaleDB** (Port 5433) — time-series price & indicator history (hypertables)
+- **Redis 7** (Port 6379) — fast in-memory quote caching, fundamentals, and rate limiting
+- **PgBouncer** (Port 6432) — connection pooling
 
-### ORM
-- **Prisma**
-
-### Auth
-- **`@nestjs/passport` + `passport-jwt`** — JWT auth (OAuth2/Google optional, not MVP)
-
-### API / Gateway
-- **NestJS API Gateway** — routing, JWT validation, rate limiting (token bucket via Redis)
-
-### Load Balancing
-- **Nginx** — reverse proxy in front of api_gateway and websocket_gateway instances (round-robin/least-conn for HTTP, sticky sessions for WebSocket)
-- Internal service traffic: Docker/K8s networking (no separate service mesh needed at this scale)
-
-### Observability
-- **Prometheus + Grafana** — metrics (request latency, Kafka consumer lag, indicator computation time, WS connection count, backtest job duration)
-- **VictoriaLogs + Vector** — structured JSON log aggregation, correlation IDs
-- **OpenTelemetry + Jaeger** — distributed tracing (HTTP + Kafka context propagation)
-- **`@nestjs/terminus`** — health check endpoints (`/health`, `/ready`) per service
-- **vmalert + Alertmanager** — log/metric-based alerting
-
-### Resilience
-- **`opossum`** — circuit breakers on external API calls and inter-service calls
-
-### DevOps
-- **Docker + docker-compose** (local/dev) — all services + infra (Kafka, Redis, Postgres, TimescaleDB, VictoriaLogs, Prometheus, Grafana, Nginx)
-- **Kubernetes** — optional stretch goal for orchestration
+### Observability & Infrastructure
+- **Docker Compose** (`infra/docker-compose.yml`) — containerized infrastructure
+- **Prometheus + Grafana** — performance metrics and monitoring
+- **Nginx & Vector** — reverse proxy and structured log routing
 
 ### Frontend
-- **React** — dashboard, charts, setup builder, backtest results, leaderboard
-- Charting: candlestick support + drawing tools (trendlines, rectangles, long/short position markers) required — evaluate **KLineCharts** (open-source, built specifically for this: candlesticks + built-in drawing tool overlays) vs **TradingView's Advanced/Lightweight Charting Library** (check current licensing terms before committing, since Lightweight Charts alone does not include drawing tools out of the box)
+- **React 19 + TypeScript + Vite** (`frontend/`)
+- **KLineCharts** — professional financial charting with custom drawing tool overlays (Fibonacci, Trendlines, Rays, Rectangles/Zones, Annotations)
+- **Zustand** — high-performance state management with instant local storage hydration and optimistic UI updates
 
 ### External Data
-- **Finnhub** (primary — 60 calls/min free tier, real-time-ish quotes + fundamentals) with **Alpha Vantage** as a secondary source for cross-checking technical indicator values
-
-### Load Testing
-- **k6** — HTTP + WebSocket load testing
-- Kafka's built-in `kafka-producer-perf-test.sh` / `kafka-consumer-perf-test.sh`
-- **pgbench** — Postgres throughput
+- **Yahoo Finance API** (primary market data feed with live autocomplete, NSE/BSE Indian equity prioritization, historical OHLCV, and global ticker resolution)
 
 ---
 
-## 3. Service Architecture (polyrepo, simple repo names)
+## 3. Service Architecture
 
-Each service lives in its **own repo**, with its own Dockerfile, its own CI/CD pipeline (lint → test → build → push image), and its own deployment lifecycle.
-
-```
-common/                  # Published npm package: shared DTOs, Kafka wrapper, logger
-user_service/            # Auth, profiles, watchlists
-market_data_service/     # Ingests external API, publishes price ticks to Kafka
-indicator_service/       # Consumes ticks, computes technical indicators (full library, configurable params)
-setup_service/           # Setup CRUD (create/rename/delete), technical + fundamental conditions, order rules
-alert_service/           # Evaluates live setups against streams, fires alerts per user's alert/signal mode
-backtest_service/        # Runs historical backtests, computes win/loss stats, ranks setups
-fundamentals_service/    # Scheduled batch jobs pulling company financials
-notification_service/    # Consumes alert-triggered events, sends email
-websocket_gateway/       # Client-facing real-time push (Socket.IO + Redis adapter)
-api_gateway/             # Routing, JWT guard, rate limiting
-frontend/                # React dashboard, chart, setup builder, backtest & leaderboard UI
-infra/                   # docker-compose, Nginx config, Prometheus/Grafana/VictoriaLogs configs
+```text
+Parakh/
+├── backend/                       # Multi-module Spring Boot backend (Java 21)
+│   ├── parakh-common/             # Shared DTOs, models, domain entities, and utilities
+│   ├── parakh-core/               # Identity (JWT), Watchlists, Setups, and Alert Engine (Port 8080)
+│   └── parakh-engine/             # Market Data, Yahoo Finance, Candles, Indicators & Backtesting (Port 8082)
+├── frontend/                      # React 19 + TypeScript + Vite + KLineCharts UI (Port 5173)
+├── infra/                         # Docker Compose Infrastructure
+│   ├── PostgreSQL (Port 5434)     # Relational DB (Users, Setups, Watchlists)
+│   ├── TimescaleDB (Port 5433)    # Hypertable time-series data
+│   ├── Redis (Port 6379)          # Low-latency caching & rate limiting
+│   ├── Kafka KRaft (Port 29092)   # Event bus for streaming prices and indicators
+│   ├── PgBouncer (Port 6432)      # Connection pooling
+│   └── Prometheus & Grafana       # Telemetry and metrics
+├── scripts/                       # Turnkey cold start and development orchestration
+└── legacy_archive/                # Locally preserved prototyping services (Git-ignored)
 ```
 
 Each service repo installs `@parakh/common` from GitHub Packages. When a shared DTO changes, bump the package's semver, publish, then update consumers — this demonstrates understanding of API contracts and independent versioning between deployed services.

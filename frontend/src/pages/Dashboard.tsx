@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useSocketStore } from '../store/socketStore';
+import { useWatchlistStore } from '../store/watchlistStore';
 import { api } from '../lib/api';
 import Chart from '../components/Chart';
 import SetupBuilder from '../components/SetupBuilder';
@@ -48,10 +49,10 @@ const POPULAR_INDIAN_STOCKS = [
 export default function Dashboard() {
   const { user, logout } = useAuthStore();
   const { connect, disconnect, subscribeSymbol, unsubscribeSymbol, prices, setPrice } = useSocketStore();
+  const { watchlist, fetchWatchlist, addSymbol: storeAdd, removeSymbol: storeRemove } = useWatchlistStore();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [watchlist, setWatchlist] = useState<any[]>([]);
   const [activeSymbol, setActiveSymbol] = useState('AAPL');
   const [activeTab, setActiveTab] = useState<Tab>('chart');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -78,6 +79,7 @@ export default function Dashboard() {
     connect();
     fetchWatchlist();
     return () => disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch initial quote & subscribe to live updates when activeSymbol changes
@@ -107,35 +109,28 @@ export default function Dashboard() {
     });
   }, [activeSymbol]);
 
-  const fetchWatchlist = async () => {
-    try {
-      const data = await api.getWatchlist();
-      setWatchlist(data);
-
-      if (data.length > 0) {
-        // Automatically select first symbol if activeSymbol not present
-        if (!data.some((item: any) => item.symbol === activeSymbol)) {
-          setActiveSymbol(data[0].symbol);
-        }
-        // Subscribe to all watchlist items
-        for (const item of data) {
-          subscribeSymbol(item.symbol);
-          api.subscribeMarket(item.symbol).catch(() => {});
-          api.getQuote(item.symbol).then((q) => {
-            if (q && (q.c || q.price)) {
-              setPrice({
-                symbol: item.symbol,
-                price: q.c || q.price,
-                timestamp: q.t || Math.floor(Date.now() / 1000),
-              });
-            }
-          }).catch(() => {});
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch watchlist', error);
+  // Subscribe to live prices for all watchlist items whenever list changes
+  useEffect(() => {
+    if (watchlist.length === 0) return;
+    // Auto-select first symbol if current activeSymbol is not in list
+    if (!watchlist.some((item) => item.symbol === activeSymbol)) {
+      setActiveSymbol(watchlist[0].symbol);
     }
-  };
+    for (const item of watchlist) {
+      subscribeSymbol(item.symbol);
+      api.subscribeMarket(item.symbol).catch(() => {});
+      api.getQuote(item.symbol).then((q) => {
+        if (q && (q.c || q.price)) {
+          setPrice({
+            symbol: item.symbol,
+            price: q.c || q.price,
+            timestamp: q.t || Math.floor(Date.now() / 1000),
+          });
+        }
+      }).catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchlist]);
 
   const handleSearch = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const query = event.target.value;
@@ -164,74 +159,21 @@ export default function Dashboard() {
     return () => window.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleAddToWatchlistOnly = async (e: React.MouseEvent, symbol: string) => {
-    e.stopPropagation();
-    // 1. Optimistic update
-    setWatchlist((prev) => (prev.some((item) => item.symbol === symbol) ? prev : [...prev, { symbol }]));
+  const handleAddSymbol = async (symbol: string, opts: { switchChart?: boolean; stopEvent?: React.MouseEvent } = {}) => {
+    opts.stopEvent?.stopPropagation();
+    if (opts.switchChart) {
+      setActiveSymbol(symbol);
+      setSearchResults([]);
+      setSearchQuery('');
+      setIsSearchFocused(false);
+      setIsSidebarOpen(false);
+    }
     subscribeSymbol(symbol);
-
-    api.subscribeMarket(symbol).catch(() => {});
     api.getQuote(symbol).then((q) => {
-      if (q && (q.c || q.price)) {
-        setPrice({
-          symbol,
-          price: q.c || q.price,
-          timestamp: q.t || Math.floor(Date.now() / 1000),
-        });
-      }
+      if (q && (q.c || q.price))
+        setPrice({ symbol, price: q.c || q.price, timestamp: q.t || Math.floor(Date.now() / 1000) });
     }).catch(() => {});
-
-    // 2. Persist to backend and sync
-    try {
-      await api.addToWatchlist(symbol);
-      const latest = await api.getWatchlist();
-      setWatchlist(latest);
-    } catch (error) {
-      console.warn('Could not add symbol to watchlist', error);
-    }
-  };
-
-  const handleSelectFromSearch = async (symbol: string) => {
-    // 1. Immediately switch active chart & close search UI
-    setActiveSymbol(symbol);
-    setSearchResults([]);
-    setSearchQuery('');
-    setIsSearchFocused(false);
-    setIsSidebarOpen(false);
-
-    // 2. Optimistic update
-    setWatchlist((prev) => (prev.some((item) => item.symbol === symbol) ? prev : [...prev, { symbol }]));
-    subscribeSymbol(symbol);
-
-    // 3. Persist to backend and refresh
-    try {
-      await api.addToWatchlist(symbol);
-      const latest = await api.getWatchlist();
-      setWatchlist(latest);
-    } catch (error) {
-      console.warn('Watchlist sync warning', error);
-    }
-  };
-
-  const handleRemoveFromWatchlist = async (e: React.MouseEvent, symbol: string) => {
-    e.stopPropagation();
-    try {
-      await api.removeFromWatchlist(symbol);
-      unsubscribeSymbol(symbol);
-      api.unsubscribeMarket(symbol).catch(() => {});
-      const updated = watchlist.filter((item) => item.symbol !== symbol);
-      setWatchlist(updated);
-
-      if (activeSymbol === symbol) {
-        if (updated.length > 0) {
-          setActiveSymbol(updated[0].symbol);
-        } else {
-          setActiveSymbol('RELIANCE.NS');
-        }
-      }
-    } catch (error) {
-      console.error('Could not remove symbol from watchlist', error);
-    }
+    await storeAdd(symbol);
   };
 
   const selectSymbol = (symbol: string) => {
@@ -244,10 +186,18 @@ export default function Dashboard() {
     setIsSidebarOpen(false);
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleRemoveFromWatchlist = async (e: React.MouseEvent, symbol: string) => {
+    e.stopPropagation();
+    unsubscribeSymbol(symbol);
+    api.unsubscribeMarket(symbol).catch(() => {});
+    await storeRemove(symbol);
+    if (activeSymbol === symbol) {
+      const remaining = watchlist.filter((w) => w.symbol !== symbol);
+      setActiveSymbol(remaining.length > 0 ? remaining[0].symbol : 'RELIANCE.NS');
+    }
   };
+
+  const handleLogout = () => { logout(); navigate('/login'); };
 
   return (
     <div className="blueprint-dashboard">
@@ -310,7 +260,7 @@ export default function Dashboard() {
                     return (
                       <div
                         key={result.symbol}
-                        onClick={() => handleSelectFromSearch(result.symbol)}
+                        onClick={() => handleAddSymbol(result.symbol, { switchChart: true })}
                         className="p-2 rounded-md cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors group"
                       >
                         <div className="flex flex-col min-w-0 pr-2">
@@ -332,7 +282,7 @@ export default function Dashboard() {
 
                         <button
                           type="button"
-                          onClick={(e) => handleAddToWatchlistOnly(e, result.symbol)}
+                          onClick={(e) => handleAddSymbol(result.symbol, { stopEvent: e })}
                           title={inWatchlist ? 'Already in Watchlist' : 'Add to Watchlist'}
                           className={`p-1.5 rounded transition-all flex items-center justify-center ${
                             inWatchlist
@@ -357,7 +307,7 @@ export default function Dashboard() {
                     return (
                       <div
                         key={item.symbol}
-                        onClick={() => handleSelectFromSearch(item.symbol)}
+                        onClick={() => handleAddSymbol(item.symbol, { switchChart: true })}
                         className="p-2 rounded-md cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors group"
                       >
                         <div className="flex flex-col min-w-0 pr-2">
@@ -372,7 +322,7 @@ export default function Dashboard() {
 
                         <button
                           type="button"
-                          onClick={(e) => handleAddToWatchlistOnly(e, item.symbol)}
+                          onClick={(e) => handleAddSymbol(item.symbol, { stopEvent: e })}
                           title={inWatchlist ? 'In Watchlist' : 'Add to Watchlist'}
                           className={`p-1.5 rounded transition-all flex items-center justify-center ${
                             inWatchlist

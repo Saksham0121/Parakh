@@ -45,3 +45,7 @@ tmp/
 # Java / Maven
 **/target/
 .mvn/
+
+# Local archives (never commit to GitHub)
+legacy_archive/
+archive/

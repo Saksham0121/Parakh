@@ -1,130 +1,101 @@
 # Parakh: Algorithmic Trading & Backtesting Platform
 
-**Parakh** is an enterprise-grade, event-driven algorithmic trading and backtesting platform built on a scalable microservices architecture. It allows users to define complex trading setups (combining technical indicators and fundamental metrics), evaluates market data in real-time, dispatches instant alerts when conditions are met, and provides robust backtesting capabilities.
+**Parakh** (परख — Hindi for "to assess/evaluate") is an enterprise-grade, event-driven algorithmic trading, technical charting, and backtesting platform. It allows traders and quants to build hybrid trading setups (combining technical indicators and fundamental metrics), evaluate market data in real-time, dispatch instant alerts when conditions trigger, and simulate historical strategies with interactive visual playback.
 
 ---
 
 ## 🏗 System Architecture
 
-The system is built as a **Polyrepo / Monorepo** (NPM Workspaces) utilizing **9 decoupled NestJS microservices**. Communication between services is primarily asynchronous and event-driven via **Kafka**.
+The platform is designed around a high-performance **multi-module Spring Boot backend**, a responsive **Vite + React frontend**, and a production-grade **containerized data infrastructure**.
 
-### Microservices
-1. **API Gateway (`api-gateway`)**: Entry point for all HTTP traffic. Handles JWT authentication, rate limiting, and reverse proxies requests to internal services. Scaled horizontally behind Nginx.
-2. **WebSocket Gateway (`websocket-gateway`)**: Dedicated gateway for real-time bi-directional communication (pushing live market data and alerts to clients).
-3. **User Service (`user-service`)**: Manages user accounts, authentication (JWT/bcrypt), and user watchlists. Connects to PostgreSQL.
-4. **Market Data Service (`market-data-service`)**: Ingests real-time market ticks via third-party APIs (Finnhub). Publishes ticks to Kafka.
-5. **Indicator Service (`indicator-service`)**: Consumes live ticks from Kafka, calculates technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands) on the fly, and stores them in TimescaleDB.
-6. **Fundamentals Service (`fundamentals-service`)**: Periodically scheduled cron jobs to fetch and cache company fundamentals (P/E Ratio, Market Cap, EPS) in PostgreSQL and Redis.
-7. **Setup Service (`setup-service`)**: Core business logic. Manages user-defined trading setups (rules and conditions) and evaluates live data streams against these rules in real-time.
-8. **Alert Service (`alert-service`)**: Triggered by the Setup Service when conditions are met. Dispatches notifications to users via WebSockets (or email).
-9. **Backtest Service (`backtest-service`)**: Simulates user-defined trading setups against historical market data to calculate strategy profitability, win rate, and drawdown.
-
-### Shared Libraries
-- **`@parakh/common`**: A shared NPM workspace package containing unified DTOs, interfaces, constants, logger utilities, OpenTelemetry tracing interceptors, and a Kafka Client wrapper to enforce DRY principles across microservices.
+```
+Parakh/
+├── backend/                       # Spring Boot Multi-Module Backend (Java 21)
+│   ├── parakh-common/             # Shared DTOs, models, domain entities, and utilities
+│   ├── parakh-core/               # Identity (JWT), Watchlists, Setups, and Alert Engine (Port 8080)
+│   └── parakh-engine/             # Live Market Data, Yahoo Finance, Candles, Indicators & Backtesting (Port 8082)
+├── frontend/                      # React 19 + TypeScript + Vite + KLineCharts UI (Port 5173)
+├── infra/                         # Docker Compose Infrastructure
+│   ├── PostgreSQL (Port 5434)     # Relational DB (Users, Setups, Watchlists)
+│   ├── TimescaleDB (Port 5433)    # Hypertable time-series data
+│   ├── Redis (Port 6379)          # Low-latency caching & rate limiting
+│   ├── Kafka KRaft (Port 29092)   # Event bus for streaming prices and indicators
+│   ├── PgBouncer (Port 6432)      # Connection pooling
+│   └── Prometheus & Grafana       # Telemetry and metrics
+├── scripts/                       # Turnkey cold start and development orchestration
+│   └── dev.sh                     # Automated startup script
+└── legacy_archive/                # Locally preserved prototyping services (Git-ignored)
+```
 
 ---
 
 ## 🛠 Technology Stack
 
-### Backend & Core
-- **Framework:** NestJS, Express
-- **Language:** TypeScript, Node.js
-- **Event Bus:** Apache Kafka (KRaft mode)
-- **API Communication:** REST APIs, WebSockets (Socket.io)
+### Backend & Analytics Engine
+- **Framework:** Spring Boot 3.4.x, Spring Data JPA, Spring Security
+- **Language:** Java 21 (LTS)
+- **Market Data Feed:** Yahoo Finance API (real-time quotes, OHLCV historical candles, and live symbol resolution)
+- **Event Streaming:** Apache Kafka (KRaft mode)
+- **Security & Auth:** Stateless JWT Authentication with BCrypt password hashing
 
 ### Databases & Caching
-- **PostgreSQL:** Relational data (Users, Watchlists, Trading Setups, Fundamentals). Managed via Prisma ORM.
+- **PostgreSQL 16:** Relational persistence for user accounts, custom setups, order rules, and watchlist items.
 - **TimescaleDB:** Time-series database optimized for storing massive volumes of financial market ticks and calculated indicators.
-- **Redis:** High-speed caching layer (fundamentals, rate limiting, session state) and Pub/Sub for WebSockets.
+- **Redis 7:** High-speed in-memory caching for real-time quotes, session tokens, and fundamentals.
+- **PgBouncer:** Lightweight connection pooling for PostgreSQL.
 
-### Infrastructure & DevOps
-- **Containerization:** Docker & Docker Compose
-- **Reverse Proxy / Load Balancer:** Nginx
-- **Connection Pooling:** PgBouncer (for PostgreSQL)
-
-### Observability & Resilience (Phase 3)
-- **Metrics:** Prometheus & Grafana (HTTP request durations, Kafka consumption rates).
-- **Distributed Tracing:** OpenTelemetry & Jaeger (propagating trace context across HTTP and Kafka).
-- **Centralized Logging:** VictoriaLogs & Vector (efficiently routing and storing Docker container logs).
-- **Circuit Breakers:** Opossum (protecting the system from cascading failures during third-party API outages).
-- **Load Testing:** k6 (Validating p95/p99 latencies under high concurrency).
+### Frontend Client
+- **Framework:** React 19, TypeScript
+- **Build Tool:** Vite with Rolldown compiler
+- **Chart Engine:** **KLineCharts** (custom drawing overlays, multi-timeframe OHLCV, indicator panes for MA, EMA, RSI, MACD, BOLL, and KDJ)
+- **State Management:** Zustand with instant local storage hydration and optimistic UI updates
+- **Styling:** CSS variables design system with dark TradingView-inspired aesthetic
 
 ---
 
-## 🚀 Key Features
+## 🚀 Key Platform Features
 
-* **Real-time Technical Analysis:** Calculates complex technical indicators on live tick streams with minimal latency.
-* **Hybrid Setup Engine:** Evaluates complex strategies that require both *Fundamental* (e.g., P/E < 15) and *Technical* (e.g., Price crosses above SMA-50) conditions simultaneously.
-* **High-Throughput Data Pipeline:** Kafka + TimescaleDB architecture capable of ingesting and persisting thousands of market events per second.
-* **Fault Tolerance:** Circuit breakers implemented on external data providers ensure the platform remains stable even if external APIs go down.
-* **Scalable Gateway:** Nginx dynamically load balances traffic across horizontally scaled instances of the API Gateway.
-* **Historical Backtesting:** Run strategies against historical data to generate detailed performance reports.
+1. **Comprehensive Stock Discovery & Indian Market Support**:
+   - Built-in recognition and prioritization for Indian equities (NSE `.NS` and BSE `.BO`) such as `RELIANCE.NS`, `TCS.NS`, `HDFCBANK.NS`, `INFY.NS`, and `TATAMOTORS.NS`.
+   - Live international symbol resolution via Yahoo Finance search API for US equities (`AAPL`, `NVDA`, `MSFT`) and cryptocurrencies (`BINANCE:BTCUSDT`).
 
----
+2. **Professional Interactive Charting**:
+   - Candlestick, Line, and Area visualization powered by KLineCharts.
+   - Comprehensive drawing suite: Trend lines, Segments, Rays, Horizontal Support/Resistance levels, Price lines, Fibonacci Retracements, Rectangle/Supply-Demand zones, and Annotations.
+   - Draggable quick-tools palette with favorite tools and keyboard navigation (`Escape`, `Delete`).
 
-## 🔄 Data & Infrastructure Flow
+3. **Hybrid Setup Builder**:
+   - Construct rules combining **Technical conditions** (e.g., RSI < 30, SMA(20) crosses above SMA(50), Volume > 1.5x) with **Fundamental thresholds** (e.g., P/E < 25, Market Cap > 100B, Debt/Equity < 1.0).
+   - Attach order management rules: Stop Loss, Take Profit, and Trailing Stops.
 
-### 1. Infrastructure Stack
-```text
-┌─────────────────────────────────────────────┐
-│                   Nginx                      │
-│         (reverse proxy, load balancer)       │
-└──────────────┬──────────────────┬────────────┘
-               │                  │
-        HTTP traffic         WebSocket
-               │                  │
-     ┌─────────┴─────────┐  ┌─────┴───────┐
-     │  API Gateway (x3) │  │  WS Gateway │
-     └─────────┬─────────┘  └──────┬──────┘
-               │                   │
-    ┌──────────┼───────────────┬───┴──────────┐
-    │          │               │              │
-┌───┴───┐ ┌────┴────┐  ┌───────┴──────┐ ┌─────┴─────┐
-│Postgres│ │  Redis  │  │    Kafka     │ │ Victoria  │
-│        │ │         │  │   (KRaft)    │ │   Logs    │
-└────────┘ └─────────┘  └──────────────┘ └───────────┘
-    │                                          ▲
-┌───┴────────┐  ┌─────────────┐                │
-│TimescaleDB │  │ Prometheus  │  Vector (Docker Logs)
-│(time-series)│  │ & Grafana   │
-└─────────────┘  └─────────────┘
-```
+4. **Interactive Historical Backtest Playback**:
+   - Simulate strategy performance across historical dates.
+   - Step-by-step visual trade replay displaying entry and exit markers, cumulative PnL, win/loss rates, and max drawdown.
 
-### 2. Live Market Data Flow
-```text
-Finnhub API ──(Circuit Breaker)──→ market-data-service ──→ Kafka [price-ticks]
-                                               │
-                               ┌───────────────┼───────────────┐
-                               │               │               │
-                      indicator-service   ws-gateway     alert-service
-                               │               │               │
-                      Kafka [indicator-    Push to       Kafka [alert-fired]
-                       updates]           clients              │
-                               │                        notification-service
-                          TimescaleDB                          │
-                                                          Email + WS
-```
+5. **Watchlist Resilience**:
+   - Zero-latency optimistic updates backed by local storage caching, ensuring watchlists remain intact even through server restarts or offline sessions.
 
 ---
 
-## 📂 Directory Structure
+## 🚦 Getting Started
 
-```text
-Parakh/
-├── api-gateway/         
-├── alert-service/
-├── backtest-service/
-├── common/              
-├── frontend/            
-├── fundamentals-service/
-├── indicator-service/
-├── market-data-service/
-├── setup-service/
-├── user-service/
-├── websocket-gateway/
-├── infra/               # Docker Compose, Nginx, Prometheus, Grafana, Vector configs
-├── k6/                  # Performance load testing scripts
-├── package.json         # Root workspace config
-├── tsconfig.base.json   
-└── info.md              # This file
+### Prerequisites
+- Java 21 JDK
+- Node.js 20+ & npm
+- Maven 3.9+
+- Docker Desktop
+
+### Turnkey One-Command Launch
+```bash
+npm run dev
 ```
+
+The startup script (`scripts/dev.sh`) automatically:
+1. Validates local environment configuration (`.env`).
+2. Starts containerized dependencies (`postgres`, `timescaledb`, `redis`, `kafka`).
+3. Bootstraps schemas and seeds default admin credentials.
+4. Concurrently launches `parakh-core` (8080), `parakh-engine` (8082), and the `frontend` (5173).
+
+### Default Test Credentials
+- **Email:** `admin@parakh.com`
+- **Password:** `password123`

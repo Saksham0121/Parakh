@@ -182,6 +182,88 @@ const getCandleStart = (timestamp: number, resolution: string) => {
   return Math.floor(timestamp / (seconds * 1000)) * seconds * 1000;
 };
 
+const BASE_CHART_STYLES = {
+  grid: {
+    horizontal: { color: '#141823', size: 1 },
+    vertical: { color: '#141823', size: 1 },
+  },
+  candle: {
+    tooltip: { showRule: TooltipShowRule.None },
+    bar: {
+      upColor: '#089981',
+      downColor: '#F23645',
+      noChangeColor: '#787B86',
+      upBorderColor: '#089981',
+      downBorderColor: '#F23645',
+      noChangeBorderColor: '#787B86',
+      upWickColor: '#089981',
+      downWickColor: '#F23645',
+      noChangeWickColor: '#787B86',
+    },
+    area: {
+      lineColor: '#2962FF',
+      backgroundColor: [
+        { offset: 0, color: 'rgba(41, 98, 255, 0.28)' },
+        { offset: 1, color: 'rgba(41, 98, 255, 0.01)' },
+      ],
+    },
+  },
+  indicator: {
+    tooltip: { showRule: TooltipShowRule.None },
+    bars: [
+      {
+        style: PolygonType.Fill,
+        upColor: 'rgba(8, 153, 129, 0.65)',
+        downColor: 'rgba(242, 54, 69, 0.65)',
+        noChangeColor: '#787B86',
+      },
+    ],
+    lines: [
+      { color: '#FF9800', size: 1.5 },
+      { color: '#29B6F6', size: 1.5 },
+      { color: '#AB47BC', size: 1.5 },
+      { color: '#EC407A', size: 1.5 },
+    ],
+  },
+  overlay: {
+    point: {
+      color: '#2962FF',
+      borderColor: '#FFFFFF',
+      borderSize: 2,
+      radius: 5,
+      activeColor: '#00E676',
+      activeBorderColor: '#FFFFFF',
+      activeBorderSize: 2,
+      activeRadius: 7,
+    },
+    line: { color: '#2962FF', size: 2 },
+    polygon: {
+      style: PolygonType.StrokeFill,
+      color: 'rgba(168, 85, 247, 0.22)',
+      borderColor: '#A855F7',
+      borderSize: 2,
+    },
+  },
+  yAxis: {
+    axisLine: { color: '#1E222D', size: 1 },
+    tickText: { color: '#787B86', family: "'JetBrains Mono', monospace", size: 11 },
+  },
+  xAxis: {
+    axisLine: { color: '#1E222D', size: 1 },
+    tickText: { color: '#787B86', family: "'JetBrains Mono', monospace", size: 11 },
+  },
+  crosshair: {
+    horizontal: {
+      line: { color: '#787B86', style: LineType.Dashed, dashedValue: [4, 4] },
+      text: { backgroundColor: '#1E222D', color: '#D1D4DC' },
+    },
+    vertical: {
+      line: { color: '#787B86', style: LineType.Dashed, dashedValue: [4, 4] },
+      text: { backgroundColor: '#1E222D', color: '#D1D4DC' },
+    },
+  },
+};
+
 export default function Chart({ symbol }: ChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartCanvasAreaRef = useRef<HTMLDivElement>(null);
@@ -202,10 +284,13 @@ export default function Chart({ symbol }: ChartProps) {
   const [isDraggingPalette, setIsDraggingPalette] = useState(false);
   const dragStartRef = useRef<{ startX: number; startY: number; initX: number; initY: number } | null>(null);
 
-  // Dropdown states
-  const [isTimeframeOpen, setIsTimeframeOpen] = useState(false);
-  const [isIndicatorsOpen, setIsIndicatorsOpen] = useState(false);
-  const [isStyleOpen, setIsStyleOpen] = useState(false);
+  // Single state for mutually-exclusive dropdowns (null = all closed)
+  const [openDropdown, setOpenDropdown] = useState<'timeframe' | 'indicators' | 'style' | null>(null);
+  const toggleDropdown = (name: 'timeframe' | 'indicators' | 'style') =>
+    setOpenDropdown((prev) => (prev === name ? null : name));
+  const isTimeframeOpen = openDropdown === 'timeframe';
+  const isIndicatorsOpen = openDropdown === 'indicators';
+  const isStyleOpen = openDropdown === 'style';
   const [indicatorSearch, setIndicatorSearch] = useState('');
   const [annotationText, setAnnotationText] = useState('');
   const [isAnnotationComposerOpen, setIsAnnotationComposerOpen] = useState(false);
@@ -239,47 +324,34 @@ export default function Chart({ symbol }: ChartProps) {
   const livePrice = useSocketStore((state) => state.prices[symbol]);
 
   const cleanSymbol = symbol.replace(/^BINANCE:/i, '').replace(/USDT$/i, '');
-  const exchange = symbol.startsWith('BINANCE:') ? 'CRYPTO' : 'NASDAQ';
+  const isIndian = symbol.endsWith('.NS') || symbol.endsWith('.BO');
+  const exchange = symbol.startsWith('BINANCE:') ? 'CRYPTO' : (symbol.endsWith('.NS') ? 'NSE' : symbol.endsWith('.BO') ? 'BSE' : 'NASDAQ');
+  const currencySymbol = isIndian ? '₹' : '$';
 
   // Draggable Toolbar Event Listeners
   useEffect(() => {
     if (!isDraggingPalette) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    // Shared logic for mouse and touch — just pass the client coords
+    const movePalette = (clientX: number, clientY: number) => {
       if (!dragStartRef.current || !chartCanvasAreaRef.current) return;
-      const deltaX = e.clientX - dragStartRef.current.startX;
-      const deltaY = e.clientY - dragStartRef.current.startY;
-
       const bounds = chartCanvasAreaRef.current.getBoundingClientRect();
-      const maxX = Math.max(0, bounds.width - 430);
-      const maxY = Math.max(0, bounds.height - 65);
-
-      const newX = Math.min(Math.max(8, dragStartRef.current.initX + deltaX), maxX);
-      const newY = Math.min(Math.max(8, dragStartRef.current.initY + deltaY), maxY);
-
+      const newX = Math.min(
+        Math.max(8, dragStartRef.current.initX + clientX - dragStartRef.current.startX),
+        Math.max(0, bounds.width - 430)
+      );
+      const newY = Math.min(
+        Math.max(8, dragStartRef.current.initY + clientY - dragStartRef.current.startY),
+        Math.max(0, bounds.height - 65)
+      );
       setPalettePos({ x: newX, y: newY });
     };
 
+    const handleMouseMove = (e: MouseEvent) => movePalette(e.clientX, e.clientY);
     const handleTouchMove = (e: TouchEvent) => {
-      if (!dragStartRef.current || !chartCanvasAreaRef.current || e.touches.length !== 1) return;
-      const touch = e.touches[0];
-      const deltaX = touch.clientX - dragStartRef.current.startX;
-      const deltaY = touch.clientY - dragStartRef.current.startY;
-
-      const bounds = chartCanvasAreaRef.current.getBoundingClientRect();
-      const maxX = Math.max(0, bounds.width - 430);
-      const maxY = Math.max(0, bounds.height - 65);
-
-      const newX = Math.min(Math.max(8, dragStartRef.current.initX + deltaX), maxX);
-      const newY = Math.min(Math.max(8, dragStartRef.current.initY + deltaY), maxY);
-
-      setPalettePos({ x: newX, y: newY });
+      if (e.touches.length === 1) movePalette(e.touches[0].clientX, e.touches[0].clientY);
     };
-
-    const handleMouseUp = () => {
-      setIsDraggingPalette(false);
-      dragStartRef.current = null;
-    };
+    const handleMouseUp = () => { setIsDraggingPalette(false); dragStartRef.current = null; };
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
@@ -347,11 +419,8 @@ export default function Chart({ symbol }: ChartProps) {
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.dropdown-scope')) {
-        setIsTimeframeOpen(false);
-        setIsIndicatorsOpen(false);
-        setIsStyleOpen(false);
+      if (!(e.target as HTMLElement).closest('.dropdown-scope')) {
+        setOpenDropdown(null);
       }
     };
     window.addEventListener('mousedown', handleClickOutside);
@@ -376,92 +445,10 @@ export default function Chart({ symbol }: ChartProps) {
 
     const chart = init(chartElement, {
       styles: {
-        grid: {
-          horizontal: { color: '#141823', size: 1 },
-          vertical: { color: '#141823', size: 1 },
-        },
+        ...BASE_CHART_STYLES,
         candle: {
+          ...BASE_CHART_STYLES.candle,
           type: chartType as any,
-          tooltip: {
-            showRule: TooltipShowRule.None,
-          },
-          bar: {
-            upColor: '#089981',
-            downColor: '#F23645',
-            noChangeColor: '#787B86',
-            upBorderColor: '#089981',
-            downBorderColor: '#F23645',
-            noChangeBorderColor: '#787B86',
-            upWickColor: '#089981',
-            downWickColor: '#F23645',
-            noChangeWickColor: '#787B86',
-          },
-          area: {
-            lineColor: '#2962FF',
-            backgroundColor: [
-              { offset: 0, color: 'rgba(41, 98, 255, 0.28)' },
-              { offset: 1, color: 'rgba(41, 98, 255, 0.01)' },
-            ],
-          },
-        },
-        indicator: {
-          tooltip: {
-            showRule: TooltipShowRule.None,
-          },
-          bars: [
-            {
-              style: PolygonType.Fill,
-              upColor: 'rgba(8, 153, 129, 0.65)',
-              downColor: 'rgba(242, 54, 69, 0.65)',
-              noChangeColor: '#787B86',
-            },
-          ],
-          lines: [
-            { color: '#FF9800', size: 1.5 },
-            { color: '#29B6F6', size: 1.5 },
-            { color: '#AB47BC', size: 1.5 },
-            { color: '#EC407A', size: 1.5 },
-          ],
-        },
-        overlay: {
-          point: {
-            color: '#2962FF',
-            borderColor: '#FFFFFF',
-            borderSize: 2,
-            radius: 5,
-            activeColor: '#00E676',
-            activeBorderColor: '#FFFFFF',
-            activeBorderSize: 2,
-            activeRadius: 7,
-          },
-          line: {
-            color: '#2962FF',
-            size: 2,
-          },
-          polygon: {
-            style: PolygonType.StrokeFill,
-            color: 'rgba(168, 85, 247, 0.22)',
-            borderColor: '#A855F7',
-            borderSize: 2,
-          },
-        },
-        yAxis: {
-          axisLine: { color: '#1E222D', size: 1 },
-          tickText: { color: '#787B86', family: "'JetBrains Mono', monospace", size: 11 },
-        },
-        xAxis: {
-          axisLine: { color: '#1E222D', size: 1 },
-          tickText: { color: '#787B86', family: "'JetBrains Mono', monospace", size: 11 },
-        },
-        crosshair: {
-          horizontal: {
-            line: { color: '#787B86', style: LineType.Dashed, dashedValue: [4, 4] },
-            text: { backgroundColor: '#1E222D', color: '#D1D4DC' },
-          },
-          vertical: {
-            line: { color: '#787B86', style: LineType.Dashed, dashedValue: [4, 4] },
-            text: { backgroundColor: '#1E222D', color: '#D1D4DC' },
-          },
         },
       },
     });
@@ -499,7 +486,7 @@ export default function Chart({ symbol }: ChartProps) {
     // Fetch historical candles
     const fetchHistory = async () => {
       try {
-        const res = await api.getCandles(symbol, resolution, 0, 0);
+        const res = await api.getCandles(symbol, resolution);
         if (res && res.t && res.t.length > 0) {
           const kLineData = res.t.map((timestamp: number, i: number) => ({
             timestamp: timestamp * 1000,
@@ -803,7 +790,7 @@ export default function Chart({ symbol }: ChartProps) {
     if (!chartInstance.current) return;
     try {
       setChartMessage(null);
-      const data = await api.getCandles(symbol, resolution, 0, 0);
+      const data = await api.getCandles(symbol, resolution);
       if (!data || !data.c || data.c.length < 20) {
         setChartMessage('Auto S/R needs at least 20 completed candles for this symbol and timeframe.');
         return;
@@ -976,9 +963,7 @@ export default function Chart({ symbol }: ChartProps) {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsTimeframeOpen(!isTimeframeOpen);
-                  setIsIndicatorsOpen(false);
-                  setIsStyleOpen(false);
+                  toggleDropdown('timeframe');
                 }}
                 className={`!h-8 !px-1.5 !py-1 rounded-md text-[#787B86] hover:text-[#F0F4F8] hover:bg-[#161B26] flex items-center justify-center transition-colors ${isTimeframeOpen ? 'bg-[#161B26] text-[#2962FF]' : ''
                   }`}
@@ -1001,7 +986,7 @@ export default function Chart({ symbol }: ChartProps) {
                           key={item.value}
                           onClick={() => {
                             setResolution(item.value);
-                            setIsTimeframeOpen(false);
+                            setOpenDropdown(null);
                           }}
                           className={`!px-2.5 !py-1.5 text-xs cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors !rounded-md !my-0.5 ${resolution === item.value ? 'text-[#2962FF] font-bold bg-[#2962FF]/15' : 'text-[#D1D4DC]'
                             }`}
@@ -1026,9 +1011,7 @@ export default function Chart({ symbol }: ChartProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setIsStyleOpen(!isStyleOpen);
-                setIsTimeframeOpen(false);
-                setIsIndicatorsOpen(false);
+                toggleDropdown('style');
               }}
               className={`flex items-center gap-1.5 !h-8 !px-2.5 !py-1 rounded-md text-[#D1D4DC] hover:bg-[#161B26] transition-colors border border-transparent hover:border-[#242C3D] whitespace-nowrap text-xs ${isStyleOpen ? 'bg-[#161B26] border-[#242C3D]' : ''
                 }`}
@@ -1052,7 +1035,7 @@ export default function Chart({ symbol }: ChartProps) {
                     key={st.value}
                     onClick={() => {
                       setChartType(st.value as any);
-                      setIsStyleOpen(false);
+                      setOpenDropdown(null);
                     }}
                     className={`!px-2.5 !py-1.5 text-xs cursor-pointer flex items-center justify-between hover:bg-[#1A2230] transition-colors !rounded-md !my-0.5 ${chartType === st.value ? 'text-[#2962FF] font-bold bg-[#2962FF]/15' : 'text-[#D1D4DC]'
                       }`}
@@ -1075,9 +1058,7 @@ export default function Chart({ symbol }: ChartProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setIsIndicatorsOpen(!isIndicatorsOpen);
-                setIsTimeframeOpen(false);
-                setIsStyleOpen(false);
+                toggleDropdown('indicators');
               }}
               className={`flex items-center gap-1.5 !h-8 !px-2.5 !py-1 rounded-md text-[#D1D4DC] hover:bg-[#161B26] transition-colors border border-transparent hover:border-[#242C3D] whitespace-nowrap text-xs ${isIndicatorsOpen ? 'bg-[#161B26] border-[#242C3D]' : ''
                 }`}
@@ -1352,7 +1333,7 @@ export default function Chart({ symbol }: ChartProps) {
                 title="Mark a sell reference level on the chart"
                 className="!h-8 !px-2.5 !py-1 flex items-center gap-1.5 bg-[#F23645]/15 hover:bg-[#F23645]/25 border border-[#F23645]/40 rounded-md text-xs font-mono transition-all whitespace-nowrap shadow-sm hover:shadow-[#F23645]/15"
               >
-                <span className="text-[#F23645] font-bold text-xs">${((ohlc.close ?? 310) * 0.9995).toFixed(2)}</span>
+                <span className="text-[#F23645] font-bold text-xs">{currencySymbol}{((ohlc.close ?? 310) * 0.9995).toFixed(2)}</span>
                 <span className="text-[#E0E3EB] text-[9px] font-bold tracking-wider">MARK SELL</span>
               </button>
               <button
@@ -1360,7 +1341,7 @@ export default function Chart({ symbol }: ChartProps) {
                 title="Mark a buy reference level on the chart"
                 className="!h-8 !px-2.5 !py-1 flex items-center gap-1.5 bg-[#089981]/15 hover:bg-[#089981]/25 border border-[#089981]/40 rounded-md text-xs font-mono transition-all whitespace-nowrap shadow-sm hover:shadow-[#089981]/15"
               >
-                <span className="text-[#089981] font-bold text-xs">${((ohlc.close ?? 310) * 1.0005).toFixed(2)}</span>
+                <span className="text-[#089981] font-bold text-xs">{currencySymbol}{((ohlc.close ?? 310) * 1.0005).toFixed(2)}</span>
                 <span className="text-[#E0E3EB] text-[9px] font-bold tracking-wider">MARK BUY</span>
               </button>
             </div>

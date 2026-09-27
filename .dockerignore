@@ -10,30 +10,23 @@ npm-debug.log*
 coverage
 **/*.test.ts
 **/*.spec.ts
-**/jest.config.*
 
-# Build outputs that we'll produce inside Docker
+# Build outputs
 **/dist
 **/.tsbuildinfo
 **/tsconfig.tsbuildinfo
+**/target/
+.mvn/
 
-# Docs and tooling
+# Docs and local tooling
 README.md
 *.md
 k6
 scratch
 .claude
 skills-lock.json
+legacy_archive/
+archive/
 
-# Service-local node_modules (workspace installs hoist to root anyway)
-api-gateway/node_modules
-user-service/node_modules
-market-data-service/node_modules
-indicator-service/node_modules
-setup-service/node_modules
-alert-service/node_modules
-websocket-gateway/node_modules
-fundamentals-service/node_modules
-backtest-service/node_modules
-common/node_modules
+# Service-local node_modules
 frontend/node_modules

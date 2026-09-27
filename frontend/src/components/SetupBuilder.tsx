@@ -99,6 +99,30 @@ function ConditionPill({ text }: { text: string }) {
   );
 }
 
+function LogicToggle({ value, onChange }: { value: string; onChange: (op: string) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
+      {['AND', 'OR'].map((op) => (
+        <button
+          key={op}
+          type="button"
+          onClick={() => onChange(op)}
+          style={{
+            padding: '2px 10px', borderRadius: 2, cursor: 'pointer',
+            fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            border: '1px solid',
+            background: value === op ? 'var(--accent-primary)' : 'transparent',
+            borderColor: value === op ? 'var(--accent-primary)' : 'var(--border-grid)',
+            color: value === op ? 'white' : 'var(--text-muted)',
+          }}
+        >
+          {op}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function TechConditionRow({
   cond, index, total,
   onChange, onRemove,
@@ -116,24 +140,7 @@ function TechConditionRow({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {index > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
-          {['AND', 'OR'].map((op) => (
-            <button
-              key={op}
-              onClick={() => onChange({ ...cond, logic: op })}
-              style={{
-                padding: '2px 10px', borderRadius: 2, cursor: 'pointer',
-                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                border: '1px solid',
-                background: cond.logic === op ? 'var(--accent-primary)' : 'transparent',
-                borderColor: cond.logic === op ? 'var(--accent-primary)' : 'var(--border-grid)',
-                color: cond.logic === op ? 'white' : 'var(--text-muted)',
-              }}
-            >
-              {op}
-            </button>
-          ))}
-        </div>
+        <LogicToggle value={cond.logic || 'AND'} onChange={(op) => onChange({ ...cond, logic: op })} />
       )}
       <div style={{ display: 'grid', gap: 8, gridTemplateColumns: isBreakPattern ? '1.2fr 1fr 1fr 1fr auto' : '1.2fr auto auto auto 90px auto', alignItems: 'end' }}>
         {/* Indicator */}
@@ -257,24 +264,7 @@ function FundConditionRow({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {index > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
-          {['AND', 'OR'].map((op) => (
-            <button
-              key={op}
-              onClick={() => onChange({ ...cond, logic: op })}
-              style={{
-                padding: '2px 10px', borderRadius: 2, cursor: 'pointer',
-                fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
-                border: '1px solid',
-                background: cond.logic === op ? 'var(--accent-primary)' : 'transparent',
-                borderColor: cond.logic === op ? 'var(--accent-primary)' : 'var(--border-grid)',
-                color: cond.logic === op ? 'white' : 'var(--text-muted)',
-              }}
-            >
-              {op}
-            </button>
-          ))}
-        </div>
+        <LogicToggle value={cond.logic || 'AND'} onChange={(op) => onChange({ ...cond, logic: op })} />
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: 8, alignItems: 'end' }}>
         <div style={{ display: 'grid', gap: 4 }}>

@@ -48,7 +48,7 @@ public class MarketService {
         subscribedSymbols.add("BINANCE:BTCUSDT");
     }
 
-    @Scheduled(fixedDelay = 3000)
+    @Scheduled(fixedDelay = 5000)
     public void pollSubscribedPrices() {
         if (subscribedSymbols.isEmpty()) return;
 
@@ -65,11 +65,19 @@ public class MarketService {
                     // 1. Publish to Kafka
                     kafkaTemplate.send(KafkaTopics.PRICE_TICKS, symbol, payload);
 
-                    // 2. Cache in Redis (TTL 10s)
-                    redisTemplate.opsForValue().set("price:" + symbol, payload, Duration.ofSeconds(10));
+                    // 2. Cache in Redis (TTL 15s)
+                    redisTemplate.opsForValue().set("price:" + symbol, payload, Duration.ofSeconds(15));
+
+                    // Cache normalized alias if symbol ends with .NS or is different
+                    if (symbol.endsWith(".NS")) {
+                        String base = symbol.substring(0, symbol.length() - 3);
+                        redisTemplate.opsForValue().set("price:" + base, payload, Duration.ofSeconds(15));
+                        kafkaTemplate.send(KafkaTopics.PRICE_TICKS, base, payload);
+                    }
                 }
+                Thread.sleep(80);
             } catch (Exception e) {
-                log.error("Error polling price for {}: {}", symbol, e.getMessage());
+                log.debug("Error polling price for {}: {}", symbol, e.getMessage());
             }
         }
     }
@@ -77,12 +85,18 @@ public class MarketService {
     public void subscribe(String symbol) {
         String clean = symbol.trim().toUpperCase();
         subscribedSymbols.add(clean);
-        log.info("Subscribed to live market updates for {}", clean);
+        String norm = yahooClient.normalizeSymbol(clean);
+        if (!norm.equalsIgnoreCase(clean)) {
+            subscribedSymbols.add(norm);
+        }
+        log.info("Subscribed to live market updates for {} ({})", clean, norm);
     }
 
     public void unsubscribe(String symbol) {
         String clean = symbol.trim().toUpperCase();
         subscribedSymbols.remove(clean);
+        String norm = yahooClient.normalizeSymbol(clean);
+        subscribedSymbols.remove(norm);
         log.info("Unsubscribed from live market updates for {}", clean);
     }
 
@@ -99,6 +113,10 @@ public class MarketService {
 
         try {
             String cached = redisTemplate.opsForValue().get("price:" + clean);
+            if (cached == null) {
+                String norm = yahooClient.normalizeSymbol(clean);
+                cached = redisTemplate.opsForValue().get("price:" + norm);
+            }
             if (cached != null) {
                 Map<String, Object> cachedMap = objectMapper.readValue(cached, Map.class);
                 cachedMap.put("c", cachedMap.get("price"));

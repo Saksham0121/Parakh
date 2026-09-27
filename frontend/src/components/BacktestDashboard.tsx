@@ -70,6 +70,8 @@ interface PlaybackData {
   result: BacktestResultData;
 }
 
+const DEFAULT_SETUPS = [{ id: 'default-ma', name: 'EMA 20/50 Trend Follower (Built-in)' }];
+
 export default function BacktestDashboard({ activeSymbol }: { activeSymbol: string }) {
   const [setups, setSetups] = useState<any[]>([]);
   const [selectedSetup, setSelectedSetup] = useState('');
@@ -116,20 +118,14 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
   useEffect(() => {
     api.getSetups()
       .then((data) => {
-        if (data && data.length > 0) {
-          setSetups(data);
-          setSelectedSetup(data[0].id);
-        } else {
-          const fallback = [{ id: 'default-ma', name: 'EMA 20/50 Trend Follower (Built-in)' }];
-          setSetups(fallback);
-          setSelectedSetup(fallback[0].id);
-        }
+        const list = data && data.length > 0 ? data : DEFAULT_SETUPS;
+        setSetups(list);
+        setSelectedSetup(list[0].id);
       })
       .catch((err) => {
         console.error(err);
-        const fallback = [{ id: 'default-ma', name: 'EMA 20/50 Trend Follower (Built-in)' }];
-        setSetups(fallback);
-        setSelectedSetup(fallback[0].id);
+        setSetups(DEFAULT_SETUPS);
+        setSelectedSetup(DEFAULT_SETUPS[0].id);
       });
 
     const end = new Date();
@@ -148,9 +144,16 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
     setStartDate(start.toISOString().split('T')[0]);
   };
 
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
   // Poll for Backtest Completion
   const pollStatus = useCallback((id: string) => {
-    if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+    stopPolling();
     pollTimerRef.current = window.setInterval(async () => {
       try {
         const res = await api.getBacktestStatus(id);
@@ -158,8 +161,7 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
         setProgress(res.progress || 0);
 
         if (res.status === 'completed') {
-          if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
-          pollTimerRef.current = null;
+          stopPolling();
           const fullPlayback = await api.getBacktestPlayback(id);
           setPlaybackData(fullPlayback);
           if (fullPlayback.bars && fullPlayback.bars.length > 0) {
@@ -169,19 +171,17 @@ export default function BacktestDashboard({ activeSymbol }: { activeSymbol: stri
             setIsPlaying(true);
           }
         } else if (res.status === 'failed') {
-          if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
-          pollTimerRef.current = null;
+          stopPolling();
           setRunError('This backtest could not be completed. Adjust the date range or setup and try again.');
         }
       } catch (err) {
         console.error('Error polling backtest status', err);
-        if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
+        stopPolling();
         setStatus('failed');
         setRunError('The backtest service stopped responding. Please try again.');
       }
     }, 1200);
-  }, []);
+  }, [stopPolling]);
 
   useEffect(() => () => {
     if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);

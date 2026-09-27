@@ -4,21 +4,17 @@ const BASE_URL = '/api';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const token = useAuthStore.getState().token;
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...options.headers,
-  };
-
   const response = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
   });
 
   if (!response.ok) {
-    if (response.status === 401) {
-      useAuthStore.getState().logout();
-    }
+    if (response.status === 401) useAuthStore.getState().logout();
     const err = await response.json().catch(() => ({ message: 'API Error' }));
     const message = Array.isArray(err.message) ? err.message[0] : err.message;
     throw new Error(message || response.statusText || 'API Error');
@@ -27,33 +23,44 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   return response.json();
 }
 
+const post = (url: string, data?: unknown) =>
+  fetchWithAuth(url, { method: 'POST', ...(data ? { body: JSON.stringify(data) } : {}) });
+
+const patch = (url: string, data?: unknown) =>
+  fetchWithAuth(url, { method: 'PATCH', ...(data ? { body: JSON.stringify(data) } : {}) });
+
+const del = (url: string) => fetchWithAuth(url, { method: 'DELETE' });
+
 export const api = {
-  login: (data: any) => fetchWithAuth('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
-  register: (data: any) => fetchWithAuth('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
-  
+  // Auth
+  login: (data: unknown) => post('/auth/login', data),
+  register: (data: unknown) => post('/auth/register', data),
+
+  // Watchlist
   getWatchlist: () => fetchWithAuth('/watchlist'),
-  addToWatchlist: (symbol: string) => fetchWithAuth('/watchlist', { method: 'POST', body: JSON.stringify({ symbol }) }),
-  removeFromWatchlist: (symbol: string) => fetchWithAuth(`/watchlist/${symbol}`, { method: 'DELETE' }),
-  
-  getCandles: (symbol: string, resolution: string, from: number, to: number) => 
-    fetchWithAuth(`/market/candles/${symbol}?resolution=${resolution}&from=${from}&to=${to}`),
-  
+  addToWatchlist: (symbol: string) => post('/watchlist', { symbol }),
+  removeFromWatchlist: (symbol: string) => del(`/watchlist/${symbol}`),
+
+  // Market data
+  getCandles: (symbol: string, resolution: string) =>
+    fetchWithAuth(`/market/candles/${symbol}?resolution=${resolution}`),
   getQuote: (symbol: string) => fetchWithAuth(`/market/quote/${symbol}`),
+  searchSymbol: (query: string) =>
+    fetchWithAuth(`/market/search?q=${encodeURIComponent(query)}`),
+  subscribeMarket: (symbol: string) => post(`/market/subscribe/${symbol}`),
+  unsubscribeMarket: (symbol: string) => del(`/market/subscribe/${symbol}`),
 
-  subscribeMarket: (symbol: string) => fetchWithAuth(`/market/subscribe/${symbol}`, { method: 'POST' }),
-  unsubscribeMarket: (symbol: string) => fetchWithAuth(`/market/subscribe/${symbol}`, { method: 'DELETE' }),
-
-  searchSymbol: (query: string) => fetchWithAuth(`/market/search?q=${query}`),
-
+  // Setups
   getSetups: () => fetchWithAuth('/setups'),
   getSetup: (id: string) => fetchWithAuth(`/setups/${id}`),
-  createSetup: (data: any) => fetchWithAuth('/setups', { method: 'POST', body: JSON.stringify(data) }),
-  updateSetup: (id: string, data: any) => fetchWithAuth(`/setups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  toggleSetupActive: (id: string) => fetchWithAuth(`/setups/${id}/activate`, { method: 'PATCH' }),
-  duplicateSetup: (id: string) => fetchWithAuth(`/setups/${id}/duplicate`, { method: 'POST' }),
-  deleteSetup: (id: string) => fetchWithAuth(`/setups/${id}`, { method: 'DELETE' }),
+  createSetup: (data: unknown) => post('/setups', data),
+  updateSetup: (id: string, data: unknown) => patch(`/setups/${id}`, data),
+  toggleSetupActive: (id: string) => patch(`/setups/${id}/activate`),
+  duplicateSetup: (id: string) => post(`/setups/${id}/duplicate`),
+  deleteSetup: (id: string) => del(`/setups/${id}`),
 
-  runBacktest: (data: any) => fetchWithAuth('/backtests', { method: 'POST', body: JSON.stringify(data) }),
+  // Backtests
+  runBacktest: (data: unknown) => post('/backtests', data),
   getBacktestStatus: (runId: string) => fetchWithAuth(`/backtests/${runId}/status`),
   getBacktestPlayback: (runId: string) => fetchWithAuth(`/backtests/${runId}/playback`),
   getBacktestRun: (runId: string) => fetchWithAuth(`/backtests/${runId}`),
