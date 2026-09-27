@@ -10,14 +10,23 @@ import type { TechnicalConditionDto, FundamentalConditionDto } from '../dto';
 export function evaluateCondition(operator: string, currentValue: number, targetValue: number): boolean {
   switch (operator) {
     case OPERATORS.GREATER_THAN:
+    case '>':
+    case 'is above':
       return currentValue > targetValue;
     case OPERATORS.LESS_THAN:
+    case '<':
+    case 'is below':
       return currentValue < targetValue;
     case OPERATORS.GREATER_EQUAL:
+    case '>=':
       return currentValue >= targetValue;
     case OPERATORS.LESS_EQUAL:
+    case '<=':
       return currentValue <= targetValue;
     case OPERATORS.EQUALS:
+    case '=':
+    case '==':
+    case 'equals':
       return Math.abs(currentValue - targetValue) < 0.0001; // float tolerance
     default:
       return false;

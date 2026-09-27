@@ -40,6 +40,9 @@ export const api = {
   
   getQuote: (symbol: string) => fetchWithAuth(`/market/quote/${symbol}`),
 
+  subscribeMarket: (symbol: string) => fetchWithAuth(`/market/subscribe/${symbol}`, { method: 'POST' }),
+  unsubscribeMarket: (symbol: string) => fetchWithAuth(`/market/subscribe/${symbol}`, { method: 'DELETE' }),
+
   searchSymbol: (query: string) => fetchWithAuth(`/market/search?q=${query}`),
 
   getSetups: () => fetchWithAuth('/setups'),
@@ -57,4 +60,3 @@ export const api = {
   getSetupBacktests: (setupId: string) => fetchWithAuth(`/backtests/setup/${setupId}`),
   getLeaderboard: () => fetchWithAuth('/backtests/leaderboard/top'),
 };
-

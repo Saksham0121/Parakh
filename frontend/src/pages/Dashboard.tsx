@@ -47,7 +47,7 @@ const POPULAR_INDIAN_STOCKS = [
 
 export default function Dashboard() {
   const { user, logout } = useAuthStore();
-  const { connect, disconnect, subscribeSymbol, prices, setPrice } = useSocketStore();
+  const { connect, disconnect, subscribeSymbol, unsubscribeSymbol, prices, setPrice } = useSocketStore();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -88,8 +88,7 @@ export default function Dashboard() {
     // Immediate REST quote fetch so user doesn't wait for WebSocket tick
     const fetchInitialQuote = async () => {
       try {
-        const cleanSym = activeSymbol.replace(/^BINANCE:/i, '');
-        const quote = await api.getQuote(cleanSym);
+        const quote = await api.getQuote(activeSymbol);
         if (quote && (quote.c || quote.price)) {
           setPrice({
             symbol: activeSymbol,
@@ -103,6 +102,9 @@ export default function Dashboard() {
     };
 
     fetchInitialQuote();
+    api.subscribeMarket(activeSymbol).catch((err) => {
+      console.warn('Live market subscription unavailable', err);
+    });
   }, [activeSymbol]);
 
   const fetchWatchlist = async () => {
@@ -118,7 +120,8 @@ export default function Dashboard() {
         // Subscribe to all watchlist items
         for (const item of data) {
           subscribeSymbol(item.symbol);
-          api.getQuote(item.symbol.replace(/^BINANCE:/i, '')).then((q) => {
+          api.subscribeMarket(item.symbol).catch(() => {});
+          api.getQuote(item.symbol).then((q) => {
             if (q && (q.c || q.price)) {
               setPrice({
                 symbol: item.symbol,
@@ -167,7 +170,8 @@ export default function Dashboard() {
     setWatchlist((prev) => (prev.some((item) => item.symbol === symbol) ? prev : [...prev, { symbol }]));
     subscribeSymbol(symbol);
 
-    api.getQuote(symbol.replace(/^BINANCE:/i, '')).then((q) => {
+    api.subscribeMarket(symbol).catch(() => {});
+    api.getQuote(symbol).then((q) => {
       if (q && (q.c || q.price)) {
         setPrice({
           symbol,
@@ -213,6 +217,8 @@ export default function Dashboard() {
     e.stopPropagation();
     try {
       await api.removeFromWatchlist(symbol);
+      unsubscribeSymbol(symbol);
+      api.unsubscribeMarket(symbol).catch(() => {});
       const updated = watchlist.filter((item) => item.symbol !== symbol);
       setWatchlist(updated);
 
@@ -272,7 +278,7 @@ export default function Dashboard() {
               value={searchQuery}
               onChange={handleSearch}
               onFocus={() => setIsSearchFocused(true)}
-              className="w-full bg-[#0B0E14] border border-[#1E2433] rounded-md pl-8 pr-8 py-2 text-xs font-mono text-[#F0F4F8] focus:border-[#2962FF]"
+              className="w-full bg-[#0B0E14] border border-[#1E2433] rounded-md !pl-9 !pr-9 py-2.5 text-xs font-mono text-[#F0F4F8] focus:border-[#2962FF]"
             />
             {searchQuery && (
               <button
@@ -386,7 +392,7 @@ export default function Dashboard() {
         </div>
 
         {/* Watchlist Section Header */}
-        <div className="px-4 py-2 flex items-center justify-between border-b border-[#1E2433] bg-[#0E121B]">
+        <div className="!px-4 !py-2 flex items-center justify-between border-b border-[#1E2433] bg-[#0E121B]">
           <span className="text-[11px] font-mono font-bold text-[#787B86] uppercase tracking-wider">
             WATCHLIST ({watchlist.length})
           </span>
@@ -407,9 +413,9 @@ export default function Dashboard() {
             return (
               <div
                 key={item.symbol}
-                className={`group flex items-center justify-between px-4 py-3 border-b border-[#1E2433] cursor-pointer transition-all ${
+                className={`group flex items-center justify-between !px-3 !py-2 border-b border-[#1E2433] cursor-pointer transition-all ${
                   isActive
-                    ? 'bg-[#161B26] border-l-2 border-l-[#2962FF] pl-3.5'
+                    ? 'bg-[#161B26] border-l-2 border-l-[#2962FF] !pl-[18px]'
                     : 'hover:bg-[#121721] border-l-2 border-l-transparent'
                 }`}
                 onClick={() => selectSymbol(item.symbol)}

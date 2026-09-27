@@ -11,6 +11,10 @@ const MARKET_DATA_URL = process.env.MARKET_DATA_SERVICE_URL || 'http://market-da
 @Injectable()
 export class SetupMatcherService implements OnModuleInit, OnModuleDestroy {
   private kafkaClient: KafkaClient;
+  // A setup can combine indicators that are emitted in separate events. Keep the
+  // latest value for each configured indicator so every condition is evaluated
+  // against the same current market state rather than accidentally skipping it.
+  private latestIndicators = new Map<string, Map<string, IndicatorValueDto>>();
 
   constructor(private prisma: PrismaService) {
     this.kafkaClient = createKafkaClient('setup-service');
@@ -112,10 +116,11 @@ export class SetupMatcherService implements OnModuleInit, OnModuleDestroy {
     update: IndicatorValueDto,
   ): Promise<{ allMatch: boolean; snapshot: any }> {
     const snapshot: any = {};
-    let allMatch = true;
+    let combinedMatch: boolean | null = null;
 
     for (const condition of conditions) {
       const type = (condition.indicator || '').toLowerCase();
+      let isMatch = false;
 
       if (type === 'breakout' || type === 'breakdown') {
         const bars = await this.fetchRecentBars(
@@ -128,32 +133,47 @@ export class SetupMatcherService implements OnModuleInit, OnModuleDestroy {
             : this.evaluateBreakdown(bars, condition.params || {});
 
         snapshot[type] = { result, params: condition.params };
-        if (!result) allMatch = false;
+        isMatch = result;
       } else {
-        // Standard indicator condition
-        if (condition.indicator !== update.indicatorType) continue;
+        // Standard indicators are emitted independently. Resolve the matching
+        // cached update (including its parameter set) instead of treating an
+        // unrelated update as an automatic match.
+        const cached = this.latestIndicators.get(update.symbol)?.get(condition.indicator);
+        const indicatorUpdate = condition.indicator === update.indicatorType ? update : cached;
+        if (!indicatorUpdate || JSON.stringify(indicatorUpdate.params) !== JSON.stringify(condition.params || {})) {
+          snapshot[condition.indicator] = { isMatch: false, reason: 'indicator value unavailable' };
+          isMatch = false;
+        } else {
+          const rawVal = indicatorUpdate.value;
+          const val =
+            typeof rawVal === 'object' && rawVal !== null
+              ? (rawVal as any).value ??
+                (rawVal as any).macd ??
+                Object.values(rawVal)[0]
+              : rawVal;
 
-        const rawVal = update.value;
-        const val =
-          typeof rawVal === 'object' && rawVal !== null
-            ? (rawVal as any).value ??
-              (rawVal as any).macd ??
-              Object.values(rawVal)[0]
-            : rawVal;
-
-        const operator = condition.operator || '>';
-        const threshold = condition.value ?? condition.threshold ?? 0;
-        const isMatch = evaluateCondition(operator, val as number, threshold);
-
-        snapshot[condition.indicator] = { val, operator, threshold, isMatch };
-        if (!isMatch) allMatch = false;
+          const operator = condition.operator || 'gt';
+          const threshold = condition.value ?? condition.threshold ?? 0;
+          isMatch = evaluateCondition(operator, val as number, threshold);
+          snapshot[condition.indicator] = { val, operator, threshold, isMatch };
+        }
       }
+
+      // The `logic` on each subsequent row describes how it joins the prior row.
+      combinedMatch = combinedMatch === null
+        ? isMatch
+        : condition.logic === 'OR'
+          ? combinedMatch || isMatch
+          : combinedMatch && isMatch;
     }
 
-    return { allMatch, snapshot };
+    return { allMatch: combinedMatch ?? false, snapshot };
   }
 
   private async processIndicatorUpdate(update: IndicatorValueDto) {
+    const symbolIndicators = this.latestIndicators.get(update.symbol) || new Map<string, IndicatorValueDto>();
+    symbolIndicators.set(update.indicatorType, update);
+    this.latestIndicators.set(update.symbol, symbolIndicators);
     const activeSetups = await this.prisma.setup.findMany({
       where: { active: true },
     });
@@ -208,4 +228,3 @@ export class SetupMatcherService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
-

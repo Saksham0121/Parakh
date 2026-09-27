@@ -119,24 +119,19 @@ Finnhub API ──(Circuit Breaker)──→ market-data-service ──→ Kafka
 
 ## 📂 Project Setup (Local Development)
 
-### 1. Start Infrastructure
-Start the databases and message brokers using Docker:
+### Turnkey One-Command Start
+Start all Docker infrastructure, databases, migrations, seed data, microservices, and frontend in a single command:
 ```bash
-cd infra
-docker-compose up -d postgres timescaledb redis kafka pgbouncer
-cd ..
+npm run dev
 ```
+*(Press `Ctrl+C` at any time to cleanly stop all services simultaneously).*
 
-### 2. Start Microservices
-Run the microservices natively for hot-reloading using the provided NPM workspace scripts:
-```bash
-npm run dev -w @parakh/api-gateway
-npm run dev -w @parakh/websocket-gateway
-npm run dev -w @parakh/user-service
-npm run dev -w @parakh/market-data-service
-npm run dev -w @parakh/indicator-service
-npm run dev -w @parakh/fundamentals-service
-npm run dev -w @parakh/setup-service
-npm run dev -w @parakh/alert-service
-npm run dev -w @parakh/backtest-service
-```
+#### Useful Scripts
+- **Full Stack (Infra + Microservices + Frontend):** `npm run dev`
+- **Backends Only:** `npm run dev:backend`
+- **Start / Stop Docker Infra:** `npm run infra:up` / `npm run infra:down`
+- **Sync DB & Seed Admin User:** `npm run db:setup`
+
+### Default Test Credentials
+- **Email:** `admin@parakh.com`
+- **Password:** `password123`

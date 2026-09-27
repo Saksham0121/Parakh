@@ -13,6 +13,7 @@ interface SocketState {
   socket: Socket | null;
   prices: Record<string, PriceTick>;
   indicators: Record<string, Record<string, any>>; // symbol -> { indicatorType_params -> data }
+  subscribedSymbols: string[];
   connect: () => void;
   disconnect: () => void;
   subscribeSymbol: (symbol: string) => void;
@@ -24,6 +25,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   socket: null,
   prices: {},
   indicators: {},
+  subscribedSymbols: [],
 
   connect: () => {
     if (get().socket) return;
@@ -35,7 +37,12 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       transports: ['websocket'],
     });
 
-    socket.on('connect', () => console.log('WebSocket connected'));
+    socket.on('connect', () => {
+      // Socket.IO rooms are server-side state, so restore them after every reconnect.
+      for (const symbol of get().subscribedSymbols) {
+        socket.emit('subscribe:symbol', { symbol });
+      }
+    });
     
     socket.on('price:update', (tick: PriceTick) => {
       set((state) => ({
@@ -68,11 +75,17 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   subscribeSymbol: (symbol: string) => {
-    get().socket?.emit('subscribe:symbol', { symbol });
+    const normalized = symbol.toUpperCase();
+    set((state) => state.subscribedSymbols.includes(normalized)
+      ? state
+      : { subscribedSymbols: [...state.subscribedSymbols, normalized] });
+    get().socket?.emit('subscribe:symbol', { symbol: normalized });
   },
 
   unsubscribeSymbol: (symbol: string) => {
-    get().socket?.emit('unsubscribe:symbol', { symbol });
+    const normalized = symbol.toUpperCase();
+    set((state) => ({ subscribedSymbols: state.subscribedSymbols.filter((item) => item !== normalized) }));
+    get().socket?.emit('unsubscribe:symbol', { symbol: normalized });
   },
 
   setPrice: (tick: PriceTick) => {

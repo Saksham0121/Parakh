@@ -13,7 +13,7 @@ async function bootstrap() {
   app.enableCors();
 
   await app.listen(port);
-  logger.info(`Fundamentals service running on port ${port}`);
+  logger.info(`Fundamentals service running on port ${port}`); // restarted
 }
 
 bootstrap();

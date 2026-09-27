@@ -12,21 +12,16 @@ const INDICATORS = [
   { value: 'RSI', label: 'RSI', category: 'momentum' },
   { value: 'SMA', label: 'SMA', category: 'trend' },
   { value: 'EMA', label: 'EMA', category: 'trend' },
-  { value: 'MACD', label: 'MACD', category: 'momentum' },
-  { value: 'BollingerBands', label: 'Bollinger Bands', category: 'volatility' },
-  { value: 'VWAP', label: 'VWAP', category: 'volume' },
-  { value: 'ATR', label: 'ATR', category: 'volatility' },
-  { value: 'Stochastic', label: 'Stochastic %K', category: 'momentum' },
   { value: 'breakout', label: '🔺 Breakout', category: 'pattern' },
   { value: 'breakdown', label: '🔻 Breakdown', category: 'pattern' },
 ];
 
 const OPERATORS = [
-  { value: '>', label: 'is above' },
-  { value: '<', label: 'is below' },
-  { value: 'crosses above', label: 'crosses above' },
-  { value: 'crosses below', label: 'crosses below' },
-  { value: '=', label: 'equals' },
+  { value: 'gt', label: 'is above' },
+  { value: 'lt', label: 'is below' },
+  { value: 'crosses_above', label: 'crosses above' },
+  { value: 'crosses_below', label: 'crosses below' },
+  { value: 'eq', label: 'equals' },
 ];
 
 const FUND_METRICS = [
@@ -44,11 +39,11 @@ const TIMEFRAMES = [
 ];
 
 function defaultTechCondition() {
-  return { id: Date.now(), indicator: 'RSI', params: { period: 14 }, operator: '>', value: 70, logic: 'AND' };
+  return { id: Date.now(), indicator: 'RSI', params: { period: 14 }, operator: 'gt', value: 70, logic: 'AND' };
 }
 
 function defaultFundCondition() {
-  return { id: Date.now(), metric: 'peRatio', operator: '<', value: 20, logic: 'AND' };
+  return { id: Date.now(), metric: 'peRatio', operator: 'lt', value: 20, logic: 'AND' };
 }
 
 function defaultOrderRule() {
@@ -57,6 +52,17 @@ function defaultOrderRule() {
 
 function defaultBreakoutParams() {
   return { lookback_period: 20, volume_multiplier: 1.5, confirmation_bars: 1 };
+}
+
+function defaultIndicatorParams(indicator: string) {
+  switch (indicator) {
+    case 'SMA': return { period: 20 };
+    case 'EMA': return { period: 12 };
+    case 'MACD': return { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 };
+    case 'BOLLINGER_BANDS': return { period: 20, stdDev: 2 };
+    case 'RSI':
+    default: return { period: 14 };
+  }
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -101,6 +107,11 @@ function TechConditionRow({
   onChange: (updated: any) => void; onRemove: () => void;
 }) {
   const isBreakPattern = cond.indicator === 'breakout' || cond.indicator === 'breakdown';
+  const availablePeriods = cond.indicator === 'SMA'
+    ? [20, 50]
+    : cond.indicator === 'EMA'
+      ? [12, 26]
+      : [14];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -136,8 +147,8 @@ function TechConditionRow({
               onChange({
                 ...cond,
                 indicator: ind,
-                params: isBreak ? defaultBreakoutParams() : { period: 14 },
-                operator: isBreak ? undefined : '>',
+                params: isBreak ? defaultBreakoutParams() : defaultIndicatorParams(ind),
+                operator: isBreak ? undefined : 'gt',
                 value: isBreak ? undefined : 70,
               });
             }}
@@ -184,12 +195,13 @@ function TechConditionRow({
             {/* Period param for non-pattern indicators */}
             <div style={{ display: 'grid', gap: 4 }}>
               <label style={labelStyle}>Period</label>
-              <input
-                type="number" min={1} max={500}
+              <select
                 value={cond.params?.period ?? 14}
                 onChange={(e) => onChange({ ...cond, params: { ...cond.params, period: +e.target.value } })}
                 style={{ ...inputStyle, width: 70 }}
-              />
+              >
+                {availablePeriods.map((period) => <option key={period} value={period}>{period}</option>)}
+              </select>
             </div>
             {/* Operator */}
             <div style={{ display: 'grid', gap: 4 }}>
@@ -382,6 +394,7 @@ export default function SetupBuilder() {
   const [editingSetup, setEditingSetup] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Builder state
   const [name, setName] = useState('');
@@ -391,7 +404,10 @@ export default function SetupBuilder() {
   const [orderRule, setOrderRule] = useState(defaultOrderRule());
 
   const fetchSetups = useCallback(async () => {
-    try { setSetups(await api.getSetups()); } catch (err) { console.error(err); }
+    try { setSetups(await api.getSetups()); } catch (err) {
+      console.error(err);
+      setActionError('Could not load your setups. Check the setup service and try again.');
+    }
   }, []);
 
   useEffect(() => { fetchSetups(); }, [fetchSetups]);
@@ -432,7 +448,11 @@ export default function SetupBuilder() {
   });
 
   const handleSave = async (activateAfterSave = false) => {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setActionError('Give this setup a name before saving it.');
+      return;
+    }
+    setActionError(null);
     setSaving(true);
     try {
       if (view === 'create') {
@@ -449,35 +469,37 @@ export default function SetupBuilder() {
       resetBuilder();
     } catch (err) {
       console.error(err);
+      setActionError(err instanceof Error ? err.message : 'Could not save this setup. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleToggleActive = async (setup: any) => {
+    setActionError(null);
     setTogglingId(setup.id);
     try {
       await api.toggleSetupActive(setup.id);
       await fetchSetups();
     } catch (err) {
       console.error(err);
+      setActionError(err instanceof Error ? err.message : 'Could not change the setup status.');
     } finally {
       setTogglingId(null);
     }
   };
 
   const handleDuplicate = async (setup: any) => {
+    setActionError(null);
     try {
       await api.duplicateSetup(setup.id);
       await fetchSetups();
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); setActionError(err instanceof Error ? err.message : 'Could not duplicate this setup.'); }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this setup?')) return;
-    try { await api.deleteSetup(id); await fetchSetups(); } catch (err) { console.error(err); }
+    try { await api.deleteSetup(id); await fetchSetups(); } catch (err) { console.error(err); setActionError(err instanceof Error ? err.message : 'Could not delete this setup.'); }
   };
 
   // ── Tech condition helpers ─────────────────────────────────────────────
@@ -508,7 +530,8 @@ export default function SetupBuilder() {
       .map((c: any) => {
         if (c.indicator === 'breakout') return `Breakout (${c.params?.lookback_period ?? 20}B)`;
         if (c.indicator === 'breakdown') return `Breakdown (${c.params?.lookback_period ?? 20}B)`;
-        return `${c.indicator} ${c.operator} ${c.value}`;
+        const operator = OPERATORS.find((item) => item.value === c.operator)?.label ?? c.operator;
+        return `${c.indicator} ${operator} ${c.value}`;
       })
       .join(', ') + (tc.length > 2 ? ` +${tc.length - 2} more` : '');
   };
@@ -540,6 +563,8 @@ export default function SetupBuilder() {
             <Plus size={16} /> New Setup
           </button>
         </header>
+
+        {actionError && <div role="alert" style={{ marginBottom: 16, padding: '12px 16px', border: '1px solid rgba(242,54,69,0.4)', background: 'rgba(242,54,69,0.1)', color: '#FF98A2', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{actionError}</div>}
 
         {setups.length === 0 ? (
           <div style={{ border: '1px dashed var(--border-grid)', padding: 48, textAlign: 'center' }}>
@@ -694,6 +719,8 @@ export default function SetupBuilder() {
           {view === 'create' ? 'New Setup' : `Edit: ${editingSetup?.name}`}
         </span>
       </div>
+
+      {actionError && <div role="alert" style={{ maxWidth: 860, marginBottom: 16, padding: '12px 16px', border: '1px solid rgba(242,54,69,0.4)', background: 'rgba(242,54,69,0.1)', color: '#FF98A2', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{actionError}</div>}
 
       <div style={{ maxWidth: 860 }}>
 
