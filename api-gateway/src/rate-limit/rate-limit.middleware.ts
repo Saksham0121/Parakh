@@ -21,8 +21,8 @@ export class RateLimitMiddleware implements NestMiddleware {
       password: this.configService.get<string>('REDIS_PASSWORD', ''),
     });
 
-    this.maxTokens = 60; // 60 requests max
-    this.refillRate = 1;  // 1 token/second (60/min matches Finnhub free tier)
+    this.maxTokens = parseInt(this.configService.get<string>('RATE_LIMIT_MAX_TOKENS', '60'), 10);
+    this.refillRate = parseFloat(this.configService.get<string>('RATE_LIMIT_REFILL_RATE', '1'));
   }
 
   async use(req: Request, res: Response, next: NextFunction) {
