@@ -141,6 +141,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - JWT_SECRET=${JWT_SECRET:-parakh_secret}
+      - RATE_LIMIT_MAX_TOKENS=${RATE_LIMIT_MAX_TOKENS:-60}
+      - RATE_LIMIT_REFILL_RATE=${RATE_LIMIT_REFILL_RATE:-1}
     depends_on:
       - redis
       - user-service
