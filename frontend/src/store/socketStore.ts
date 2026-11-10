@@ -1,96 +1,107 @@
 import { create } from 'zustand';
-import { io, Socket } from 'socket.io-client';
+import { io, type Socket } from 'socket.io-client';
 import { useAuthStore } from './authStore';
+import { useAlertStore } from './alertStore';
+import type { Quote } from '../lib/types';
 
 export interface PriceTick {
   symbol: string;
   price: number;
   volume?: number;
   timestamp: number;
+  changePct?: number;
+  prevClose?: number;
 }
 
 interface SocketState {
-  socket: Socket | null;
+  connected: boolean;
   prices: Record<string, PriceTick>;
-  indicators: Record<string, Record<string, any>>; // symbol -> { indicatorType_params -> data }
-  subscribedSymbols: string[];
   connect: () => void;
   disconnect: () => void;
   subscribeSymbol: (symbol: string) => void;
   unsubscribeSymbol: (symbol: string) => void;
-  setPrice: (tick: PriceTick) => void;
+  applyQuotes: (quotes: Record<string, Quote>) => void;
 }
 
-export const useSocketStore = create<SocketState>((set, get) => ({
-  socket: null,
-  prices: {},
-  indicators: {},
-  subscribedSymbols: [],
+let socket: Socket | null = null;
+const rooms = new Set<string>();
 
-  connect: () => {
-    if (get().socket) return;
-    const token = useAuthStore.getState().token;
-    
-    // Connect to WS Gateway (proxy handles /socket.io to gateway)
-    const socket = io('/', {
-      auth: { token },
-      transports: ['websocket'],
-    });
+// Ticks are coalesced and flushed once per animation frame: 50 symbols ticking at once cause one render, not 50.
+let pending: Record<string, PriceTick> = {};
+let flushScheduled = false;
 
-    socket.on('connect', () => {
-      // Socket.IO rooms are server-side state, so restore them after every reconnect.
-      for (const symbol of get().subscribedSymbols) {
-        socket.emit('subscribe:symbol', { symbol });
+export const useSocketStore = create<SocketState>((set, get) => {
+  const flush = () => {
+    flushScheduled = false;
+    const batch = pending;
+    pending = {};
+    set((s) => {
+      const next = { ...s.prices };
+      for (const [sym, tick] of Object.entries(batch)) {
+        const prev = next[sym];
+        const prevClose = tick.prevClose ?? prev?.prevClose;
+        next[sym] = {
+          ...prev,
+          ...tick,
+          prevClose,
+          changePct: tick.changePct ?? (prevClose ? ((tick.price - prevClose) / prevClose) * 100 : prev?.changePct),
+        };
       }
+      return { prices: next };
     });
-    
-    socket.on('price:update', (tick: PriceTick) => {
-      set((state) => ({
-        prices: { ...state.prices, [tick.symbol]: tick },
-      }));
-    });
-
-    socket.on('indicator:update', (data: any) => {
-      const key = `${data.indicatorType}_${JSON.stringify(data.params)}`;
-      set((state) => ({
-        indicators: {
-          ...state.indicators,
-          [data.symbol]: {
-            ...(state.indicators[data.symbol] || {}),
-            [key]: data,
-          },
-        },
-      }));
-    });
-
-    set({ socket });
-  },
-
-  disconnect: () => {
-    const { socket } = get();
-    if (socket) {
-      socket.disconnect();
-      set({ socket: null });
+  };
+  const queue = (tick: PriceTick) => {
+    pending[tick.symbol] = { ...pending[tick.symbol], ...tick };
+    if (!flushScheduled) {
+      flushScheduled = true;
+      requestAnimationFrame(flush);
     }
-  },
+  };
 
-  subscribeSymbol: (symbol: string) => {
-    const normalized = symbol.toUpperCase();
-    set((state) => state.subscribedSymbols.includes(normalized)
-      ? state
-      : { subscribedSymbols: [...state.subscribedSymbols, normalized] });
-    get().socket?.emit('subscribe:symbol', { symbol: normalized });
-  },
+  return {
+    connected: false,
+    prices: {},
 
-  unsubscribeSymbol: (symbol: string) => {
-    const normalized = symbol.toUpperCase();
-    set((state) => ({ subscribedSymbols: state.subscribedSymbols.filter((item) => item !== normalized) }));
-    get().socket?.emit('unsubscribe:symbol', { symbol: normalized });
-  },
+    connect: () => {
+      if (socket) return;
+      const token = useAuthStore.getState().token;
+      // netty-socketio reads the token from the handshake query, not from the socket.io v4 `auth` payload.
+      socket = io('/', { query: token ? { token } : {}, transports: ['websocket'], reconnectionDelayMax: 10_000 });
+      socket.on('connect', () => {
+        set({ connected: true });
+        for (const symbol of rooms) socket?.emit('subscribe:symbol', { symbol });
+      });
+      socket.on('disconnect', () => set({ connected: false }));
+      socket.on('price:update', (tick: PriceTick) => {
+        if (tick?.symbol && Number.isFinite(tick.price)) queue({ symbol: tick.symbol, price: tick.price, volume: tick.volume, timestamp: tick.timestamp });
+      });
+      socket.on('alert:fired', (alert) => useAlertStore.getState().pushLive(alert));
+    },
 
-  setPrice: (tick: PriceTick) => {
-    set((state) => ({
-      prices: { ...state.prices, [tick.symbol]: tick },
-    }));
-  },
-}));
+    disconnect: () => {
+      socket?.disconnect();
+      socket = null;
+      set({ connected: false });
+    },
+
+    subscribeSymbol: (symbol) => {
+      const s = symbol.toUpperCase();
+      if (rooms.has(s)) return;
+      rooms.add(s);
+      socket?.emit('subscribe:symbol', { symbol: s });
+    },
+
+    unsubscribeSymbol: (symbol) => {
+      const s = symbol.toUpperCase();
+      rooms.delete(s);
+      socket?.emit('unsubscribe:symbol', { symbol: s });
+    },
+
+    applyQuotes: (quotes) => {
+      for (const [sym, q] of Object.entries(quotes)) {
+        if (q && Number.isFinite(q.c)) queue({ symbol: sym, price: q.c, timestamp: q.t, changePct: q.dp, prevClose: q.pc, volume: q.v });
+      }
+      void get;
+    },
+  };
+});

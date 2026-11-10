@@ -1,14 +1,22 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
+    },
+  },
+  build: {
+    target: 'es2022',
+    rollupOptions: {
+      output: {
+        // Keep the charting library in its own long-lived cached chunk.
+        manualChunks: (id) => (id.includes('klinecharts') ? 'charts' : id.includes('node_modules') ? 'vendor' : undefined),
+      },
     },
   },
   server: {
@@ -24,6 +32,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/api/indicators': {
+        target: 'http://localhost:8082',
+        changeOrigin: true,
+      },
+      '/api/scanner': {
         target: 'http://localhost:8082',
         changeOrigin: true,
       },

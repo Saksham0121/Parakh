@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.net.CookieManager;
+import java.net.CookiePolicy;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -15,7 +17,22 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * Thin, resilient Yahoo Finance adapter.
+ *
+ * <p>Design rules:</p>
+ * <ul>
+ *   <li>Never invent data. When Yahoo has nothing, methods return {@code null} and callers surface
+ *       "data unavailable" — an analysis tool must not chart or backtest synthetic prices.</li>
+ *   <li>Back off when rate limited (HTTP 429) instead of hammering the upstream, which only extends the ban.</li>
+ *   <li>All network calls are bounded by short timeouts and run on virtual threads.</li>
+ * </ul>
+ */
 @Component
 public class YahooFinanceClient {
 
@@ -23,75 +40,36 @@ public class YahooFinanceClient {
     private static final String YF_HOST = "https://query2.finance.yahoo.com";
     private static final String USER_AGENT = "Mozilla/5.0 (compatible; yahoo-finance2/4.0.2)";
 
+    private static final ExecutorService VT = Executors.newVirtualThreadPerTaskExecutor();
+
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    // Curated high-volume Indian equity master for instant autocomplete
-    private static final Map<String, String> INDIAN_EQUITY_MASTER = new LinkedHashMap<>();
-    static {
-        INDIAN_EQUITY_MASTER.put("GRSE", "Garden Reach Shipbuilders & Engineers Ltd");
-        INDIAN_EQUITY_MASTER.put("BSE", "BSE Limited");
-        INDIAN_EQUITY_MASTER.put("HAL", "Hindustan Aeronautics Limited");
-        INDIAN_EQUITY_MASTER.put("BEL", "Bharat Electronics Limited");
-        INDIAN_EQUITY_MASTER.put("COCHINSHIP", "Cochin Shipyard Limited");
-        INDIAN_EQUITY_MASTER.put("BDL", "Bharat Dynamics Limited");
-        INDIAN_EQUITY_MASTER.put("MAZDOCK", "Mazagon Dock Shipbuilders Limited");
-        INDIAN_EQUITY_MASTER.put("RVNL", "Rail Vikas Nigam Limited");
-        INDIAN_EQUITY_MASTER.put("IRFC", "Indian Railway Finance Corporation");
-        INDIAN_EQUITY_MASTER.put("ZOMATO", "Zomato Limited");
-        INDIAN_EQUITY_MASTER.put("PAYTM", "One97 Communications Limited (Paytm)");
-        INDIAN_EQUITY_MASTER.put("JIOFIN", "Jio Financial Services Limited");
-        INDIAN_EQUITY_MASTER.put("CDSL", "Central Depository Services (India) Ltd");
-        INDIAN_EQUITY_MASTER.put("RELIANCE", "Reliance Industries Limited");
-        INDIAN_EQUITY_MASTER.put("TCS", "Tata Consultancy Services Limited");
-        INDIAN_EQUITY_MASTER.put("HDFCBANK", "HDFC Bank Limited");
-        INDIAN_EQUITY_MASTER.put("INFY", "Infosys Limited");
-        INDIAN_EQUITY_MASTER.put("TATAMOTORS", "Tata Motors Limited");
-        INDIAN_EQUITY_MASTER.put("TATASTEEL", "Tata Steel Limited");
-        INDIAN_EQUITY_MASTER.put("ICICIBANK", "ICICI Bank Limited");
-        INDIAN_EQUITY_MASTER.put("SBIN", "State Bank of India");
-        INDIAN_EQUITY_MASTER.put("ITC", "ITC Limited");
-        INDIAN_EQUITY_MASTER.put("LT", "Larsen & Toubro Limited");
-        INDIAN_EQUITY_MASTER.put("BHARTIARTL", "Bharti Airtel Limited");
-        INDIAN_EQUITY_MASTER.put("ADANIENT", "Adani Enterprises Limited");
-        INDIAN_EQUITY_MASTER.put("ADANIPORTS", "Adani Ports and Special Economic Zone");
-        INDIAN_EQUITY_MASTER.put("ASIANPAINT", "Asian Paints Limited");
-        INDIAN_EQUITY_MASTER.put("MARUTI", "Maruti Suzuki India Limited");
-        INDIAN_EQUITY_MASTER.put("SUNPHARMA", "Sun Pharmaceutical Industries Limited");
-        INDIAN_EQUITY_MASTER.put("WIPRO", "Wipro Limited");
-        INDIAN_EQUITY_MASTER.put("HCLTECH", "HCL Technologies Limited");
-        INDIAN_EQUITY_MASTER.put("NTPC", "NTPC Limited");
-        INDIAN_EQUITY_MASTER.put("POWERGRID", "Power Grid Corporation of India");
-        INDIAN_EQUITY_MASTER.put("TITAN", "Titan Company Limited");
-        INDIAN_EQUITY_MASTER.put("BAJFINANCE", "Bajaj Finance Limited");
-        INDIAN_EQUITY_MASTER.put("BAJAJFINSV", "Bajaj Finserv Limited");
-        INDIAN_EQUITY_MASTER.put("ONGC", "Oil & Natural Gas Corporation");
-        INDIAN_EQUITY_MASTER.put("COALINDIA", "Coal India Limited");
-        INDIAN_EQUITY_MASTER.put("KOTAKBANK", "Kotak Mahindra Bank");
-        INDIAN_EQUITY_MASTER.put("AXISBANK", "Axis Bank Limited");
-        INDIAN_EQUITY_MASTER.put("ULTRACEMCO", "UltraTech Cement Limited");
-        INDIAN_EQUITY_MASTER.put("NESTLEIND", "Nestle India Limited");
-        INDIAN_EQUITY_MASTER.put("JSWSTEEL", "JSW Steel Limited");
-        INDIAN_EQUITY_MASTER.put("TRENT", "Trent Limited");
-        INDIAN_EQUITY_MASTER.put("VEDL", "Vedanta Limited");
-        INDIAN_EQUITY_MASTER.put("IREDA", "Indian Renewable Energy Dev Agency");
-        INDIAN_EQUITY_MASTER.put("SUZLON", "Suzlon Energy Limited");
-        INDIAN_EQUITY_MASTER.put("BHEL", "Bharat Heavy Electricals Limited");
-        INDIAN_EQUITY_MASTER.put("NHPC", "NHPC Limited");
-        INDIAN_EQUITY_MASTER.put("SJVN", "SJVN Limited");
-        INDIAN_EQUITY_MASTER.put("YESBANK", "Yes Bank Limited");
-        INDIAN_EQUITY_MASTER.put("IDEA", "Vodafone Idea Limited");
-    }
+    /** Epoch millis until which upstream calls are skipped after a 429. */
+    private volatile long coolDownUntil = 0;
+    private volatile long coolDownMs = 15_000;
+    private volatile String crumb;
 
     public YahooFinanceClient(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
+        CookieManager cookies = new CookieManager();
+        cookies.setCookiePolicy(CookiePolicy.ACCEPT_ALL);
         this.httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.ALWAYS)
-                .connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(5))
+                .cookieHandler(cookies)
+                .executor(VT)
                 .build();
     }
 
-    private String executeGet(String url) {
+    public boolean isRateLimited() {
+        return System.currentTimeMillis() < coolDownUntil;
+    }
+
+    private record Resp(int status, String body) {}
+
+    private Resp send(String url) {
+        if (isRateLimited()) return new Resp(429, null);
         try {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -100,35 +78,35 @@ public class YahooFinanceClient {
                     .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
-
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() == 200) {
-                return resp.body();
-            } else {
-                log.debug("HTTP GET status {} for {}", resp.statusCode(), url);
+            if (resp.statusCode() == 429) {
+                coolDownUntil = System.currentTimeMillis() + coolDownMs;
+                log.warn("Yahoo Finance rate limit hit; pausing upstream calls for {}s", coolDownMs / 1000);
+                coolDownMs = Math.min(coolDownMs * 2, 300_000);
+            } else if (resp.statusCode() == 200) {
+                coolDownMs = 15_000;
             }
+            return new Resp(resp.statusCode(), resp.body());
         } catch (Exception e) {
             log.debug("HTTP GET error for {}: {}", url, e.getMessage());
+            return new Resp(-1, null);
         }
-        return null;
     }
 
+    private String executeGet(String url) {
+        Resp r = send(url);
+        return r.status() == 200 ? r.body() : null;
+    }
+
+    // ─── Symbols & resolutions ──────────────────────────────────────────────────
+
     public String normalizeSymbol(String raw) {
-        if (raw == null) return "AAPL";
+        if (raw == null) return "";
         String clean = raw.trim().toUpperCase();
-        if (clean.startsWith("BINANCE:")) {
-            clean = clean.replace("BINANCE:", "");
-        }
-        if (clean.endsWith("USDT")) {
-            clean = clean.replaceAll("USDT$", "-USD");
-        }
-        if (clean.endsWith("USD") && !clean.contains("-")) {
-            clean = clean.replaceAll("USD$", "-USD");
-        }
-        // If raw matches known Indian ticker without extension, normalize directly to .NS
-        if (INDIAN_EQUITY_MASTER.containsKey(clean)) {
-            return clean + ".NS";
-        }
+        if (clean.startsWith("BINANCE:")) clean = clean.substring("BINANCE:".length());
+        if (clean.endsWith("USDT")) clean = clean.replaceAll("USDT$", "-USD");
+        if (clean.endsWith("USD") && !clean.contains("-") && clean.length() > 3) clean = clean.replaceAll("USD$", "-USD");
+        if (IndianEquityMaster.TICKERS.containsKey(clean)) return clean + ".NS";
         return clean;
     }
 
@@ -146,295 +124,278 @@ public class YahooFinanceClient {
         };
     }
 
+    /** Yahoo only serves limited history for intraday intervals; asking for more returns an error. */
+    public long maxHistorySeconds(String resolution) {
+        return switch (resolution == null ? "D" : resolution) {
+            case "1" -> 7L * 86400;
+            case "5", "15", "30" -> 59L * 86400;
+            case "60" -> 729L * 86400;
+            default -> 40L * 365 * 86400;
+        };
+    }
+
+    // ─── Candles ────────────────────────────────────────────────────────────────
+
+    /** Returns {t,o,h,l,c,v,s:"ok",symbol} or {@code null} when no real data is available. */
     public Map<String, Object> getCandles(String symbol, String resolution, long from, long to) {
         String norm = normalizeSymbol(symbol);
-        Map<String, Object> data = fetchYahooCandles(norm, resolution, from, to);
-        if (data != null) {
-            return data;
-        }
-
-        // If norm has no extension and failed, attempt .NS and .BO fallbacks
-        if (!norm.contains(".") && !norm.contains("-")) {
-            Map<String, Object> nsCandles = fetchYahooCandles(norm + ".NS", resolution, from, to);
-            if (nsCandles != null) {
-                return nsCandles;
-            }
-            Map<String, Object> boCandles = fetchYahooCandles(norm + ".BO", resolution, from, to);
-            if (boCandles != null) {
-                return boCandles;
-            }
-        }
-
-        // Fallback to mock candles only if real data is completely unavailable
         long now = Instant.now().getEpochSecond();
-        long p1 = from > 0 ? from : now - 365 * 86400L;
         long p2 = to > 0 ? to : now;
-        log.warn("All Yahoo candle attempts failed for {}. Generating fallback mock candles.", symbol);
-        return generateMockCandles(p1, p2, 100.0);
+        long p1 = from > 0 ? from : p2 - 365 * 86400L;
+        p1 = Math.max(p1, now - maxHistorySeconds(resolution));
+
+        Map<String, Object> data = fetchYahooCandles(norm, resolution, p1, p2);
+        if (data != null || norm.contains(".") || norm.contains("-")) return data;
+
+        // Bare ticker that Yahoo didn't recognise: try NSE and BSE in parallel.
+        final long start = p1;
+        var ns = CompletableFuture.supplyAsync(() -> fetchYahooCandles(norm + ".NS", resolution, start, p2), VT);
+        var bo = CompletableFuture.supplyAsync(() -> fetchYahooCandles(norm + ".BO", resolution, start, p2), VT);
+        Map<String, Object> nsData = await(ns, 10_000);
+        return nsData != null ? nsData : await(bo, 2_000);
     }
 
-    private Map<String, Object> fetchYahooCandles(String symbol, String resolution, long from, long to) {
+    private static <T> T await(CompletableFuture<T> f, long ms) {
+        try {
+            return f.get(ms, TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Map<String, Object> fetchYahooCandles(String symbol, String resolution, long p1, long p2) {
         String interval = mapResolutionToInterval(resolution);
-        long now = Instant.now().getEpochSecond();
-        long p1 = from > 0 ? from : now - 365 * 86400L;
-        long p2 = to > 0 ? to : now;
-
-        String url = String.format("%s/v8/finance/chart/%s?interval=%s&period1=%d&period2=%d",
-                YF_HOST, symbol, interval, p1, p2);
-
+        String url = String.format("%s/v8/finance/chart/%s?interval=%s&period1=%d&period2=%d&includePrePost=false&events=div%%2Csplits",
+                YF_HOST, URLEncoder.encode(symbol, StandardCharsets.UTF_8), interval, p1, p2);
         try {
             String response = executeGet(url);
-            if (response != null) {
-                JsonNode root = objectMapper.readTree(response);
-                JsonNode result = root.path("chart").path("result");
-                if (result.isArray() && !result.isEmpty()) {
-                    JsonNode node = result.get(0);
-                    JsonNode timestamps = node.path("timestamp");
-                    JsonNode indicators = node.path("indicators");
-                    JsonNode quoteArr = indicators.path("quote");
+            if (response == null) return null;
+            JsonNode result = objectMapper.readTree(response).path("chart").path("result");
+            if (!result.isArray() || result.isEmpty()) return null;
+            JsonNode node = result.get(0);
+            JsonNode ts = node.path("timestamp");
+            JsonNode quote = node.path("indicators").path("quote").path(0);
+            if (!ts.isArray() || quote.isMissingNode()) return null;
 
-                    if (timestamps.isArray() && quoteArr.isArray() && !quoteArr.isEmpty()) {
-                        JsonNode quote = quoteArr.get(0);
-                        JsonNode opens = quote.path("open");
-                        JsonNode highs = quote.path("high");
-                        JsonNode lows = quote.path("low");
-                        JsonNode closes = quote.path("close");
-                        JsonNode volumes = quote.path("volume");
-
-                        List<Long> t = new ArrayList<>();
-                        List<Double> o = new ArrayList<>();
-                        List<Double> h = new ArrayList<>();
-                        List<Double> l = new ArrayList<>();
-                        List<Double> c = new ArrayList<>();
-                        List<Long> v = new ArrayList<>();
-
-                        for (int i = 0; i < timestamps.size(); i++) {
-                            if (closes.get(i) == null || closes.get(i).isNull()) continue;
-                            if (opens.get(i) == null || opens.get(i).isNull()) continue;
-
-                            t.add(timestamps.get(i).asLong());
-                            o.add(opens.get(i).asDouble());
-                            h.add(highs.get(i) != null && !highs.get(i).isNull() ? highs.get(i).asDouble() : opens.get(i).asDouble());
-                            l.add(lows.get(i) != null && !lows.get(i).isNull() ? lows.get(i).asDouble() : opens.get(i).asDouble());
-                            c.add(closes.get(i).asDouble());
-                            v.add(volumes.get(i) != null && !volumes.get(i).isNull() ? volumes.get(i).asLong() : 0L);
-                        }
-
-                        if (!t.isEmpty()) {
-                            log.info("Successfully fetched {} real candles for {}", t.size(), symbol);
-                            return Map.of("t", t, "o", o, "h", h, "l", l, "c", c, "v", v, "s", "ok");
-                        }
-                    }
-                }
+            JsonNode opens = quote.path("open"), highs = quote.path("high"), lows = quote.path("low"),
+                    closes = quote.path("close"), volumes = quote.path("volume");
+            int n = ts.size();
+            List<Long> t = new ArrayList<>(n);
+            List<Double> o = new ArrayList<>(n), h = new ArrayList<>(n), l = new ArrayList<>(n), c = new ArrayList<>(n);
+            List<Long> v = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                JsonNode cl = closes.path(i), op = opens.path(i);
+                if (cl.isMissingNode() || cl.isNull() || op.isMissingNode() || op.isNull()) continue;
+                double close = cl.asDouble(), open = op.asDouble();
+                t.add(ts.get(i).asLong());
+                o.add(open);
+                h.add(highs.path(i).isNumber() ? highs.path(i).asDouble() : Math.max(open, close));
+                l.add(lows.path(i).isNumber() ? lows.path(i).asDouble() : Math.min(open, close));
+                c.add(close);
+                v.add(volumes.path(i).isNumber() ? volumes.path(i).asLong() : 0L);
             }
+            if (t.isEmpty()) return null;
+            JsonNode meta = node.path("meta");
+            Map<String, Object> out = new HashMap<>();
+            out.put("t", t); out.put("o", o); out.put("h", h); out.put("l", l); out.put("c", c); out.put("v", v);
+            out.put("s", "ok");
+            out.put("symbol", symbol);
+            out.put("currency", meta.path("currency").asText(""));
+            out.put("exchange", meta.path("exchangeName").asText(""));
+            return out;
         } catch (Exception e) {
-            log.debug("Yahoo finance candles fetch failed for {}: {}", symbol, e.getMessage());
+            log.debug("Yahoo candles parse failed for {}: {}", symbol, e.getMessage());
+            return null;
         }
-        return null;
     }
 
+    // ─── Quotes ─────────────────────────────────────────────────────────────────
+
+    /** Returns a quote map or {@code null} when the symbol can't be priced right now. */
     public Map<String, Object> getQuote(String symbol) {
         String norm = normalizeSymbol(symbol);
-        Map<String, Object> quote = fetchYahooQuote(norm);
-        if (quote != null) {
-            return quote;
-        }
-
-        if (!norm.contains(".") && !norm.contains("-")) {
-            Map<String, Object> nsQuote = fetchYahooQuote(norm + ".NS");
-            if (nsQuote != null) return nsQuote;
-
-            Map<String, Object> boQuote = fetchYahooQuote(norm + ".BO");
-            if (boQuote != null) return boQuote;
-        }
-
-        // Fallback deterministic quote
-        int hash = Math.abs(norm.hashCode());
-        double mockPrice = 50.0 + (hash % 1000);
-        return Map.of(
-                "c", mockPrice,
-                "price", mockPrice,
-                "d", 1.25,
-                "dp", 0.85,
-                "h", mockPrice * 1.02,
-                "l", mockPrice * 0.98,
-                "o", mockPrice,
-                "pc", mockPrice - 1.25,
-                "t", Instant.now().getEpochSecond()
-        );
+        Map<String, Object> q = fetchYahooQuote(norm);
+        if (q != null || norm.contains(".") || norm.contains("-")) return q;
+        q = fetchYahooQuote(norm + ".NS");
+        return q != null ? q : fetchYahooQuote(norm + ".BO");
     }
 
     private Map<String, Object> fetchYahooQuote(String symbol) {
-        String url = String.format("%s/v8/finance/chart/%s?interval=1d&range=1d", YF_HOST, symbol);
-
+        String url = String.format("%s/v8/finance/chart/%s?interval=1d&range=5d", YF_HOST, URLEncoder.encode(symbol, StandardCharsets.UTF_8));
         try {
             String response = executeGet(url);
-            if (response != null) {
-                JsonNode root = objectMapper.readTree(response);
-                JsonNode result = root.path("chart").path("result");
-                if (result.isArray() && !result.isEmpty()) {
-                    JsonNode meta = result.get(0).path("meta");
-                    if (!meta.isMissingNode() && meta.has("regularMarketPrice")) {
-                        double price = meta.path("regularMarketPrice").asDouble();
-                        double prevClose = meta.path("chartPreviousClose").asDouble(price);
-                        double diff = price - prevClose;
-                        double diffPct = prevClose > 0 ? (diff / prevClose) * 100 : 0.0;
-
-                        return Map.of(
-                                "c", price,
-                                "price", price,
-                                "d", diff,
-                                "dp", diffPct,
-                                "h", meta.path("regularMarketDayHigh").asDouble(price),
-                                "l", meta.path("regularMarketDayLow").asDouble(price),
-                                "o", meta.path("regularMarketDayOpen").asDouble(price),
-                                "pc", prevClose,
-                                "t", Instant.now().getEpochSecond()
-                        );
-                    }
+            if (response == null) return null;
+            JsonNode res = objectMapper.readTree(response).path("chart").path("result").path(0);
+            JsonNode meta = res.path("meta");
+            if (!meta.has("regularMarketPrice")) return null;
+            double price = meta.path("regularMarketPrice").asDouble();
+            // chartPreviousClose is the close before the *range*, so derive the prior session from the series.
+            double prevClose = meta.path("previousClose").asDouble(Double.NaN);
+            JsonNode closes = res.path("indicators").path("quote").path(0).path("close");
+            if (Double.isNaN(prevClose) && closes.isArray() && closes.size() >= 2) {
+                for (int i = closes.size() - 2; i >= 0; i--) {
+                    if (closes.get(i).isNumber()) { prevClose = closes.get(i).asDouble(); break; }
                 }
             }
+            if (Double.isNaN(prevClose)) prevClose = meta.path("chartPreviousClose").asDouble(price);
+            double diff = price - prevClose;
+            Map<String, Object> q = new HashMap<>();
+            q.put("symbol", symbol);
+            q.put("c", price);
+            q.put("price", price);
+            q.put("d", diff);
+            q.put("dp", prevClose > 0 ? diff / prevClose * 100 : 0.0);
+            q.put("h", meta.path("regularMarketDayHigh").asDouble(price));
+            q.put("l", meta.path("regularMarketDayLow").asDouble(price));
+            q.put("o", meta.path("regularMarketDayOpen").asDouble(price));
+            q.put("pc", prevClose);
+            q.put("v", meta.path("regularMarketVolume").asLong(0));
+            q.put("high52", meta.path("fiftyTwoWeekHigh").asDouble(Double.NaN));
+            q.put("low52", meta.path("fiftyTwoWeekLow").asDouble(Double.NaN));
+            q.put("currency", meta.path("currency").asText(""));
+            q.put("exchange", meta.path("exchangeName").asText(""));
+            q.put("name", meta.path("longName").asText(meta.path("shortName").asText(symbol)));
+            q.put("t", meta.path("regularMarketTime").asLong(Instant.now().getEpochSecond()));
+            q.values().removeIf(v -> v instanceof Double d && d.isNaN());
+            return q;
         } catch (Exception e) {
             log.debug("Yahoo quote fetch failed for {}: {}", symbol, e.getMessage());
+            return null;
+        }
+    }
+
+    // ─── Fundamentals ───────────────────────────────────────────────────────────
+
+    private synchronized String crumb(boolean refresh) {
+        if (crumb != null && !refresh) return crumb;
+        if (isRateLimited()) return null;
+        send("https://fc.yahoo.com/"); // sets the consent cookie; a 404 here is expected
+        Resp r = send(YF_HOST + "/v1/test/getcrumb");
+        crumb = r.status() == 200 && r.body() != null && !r.body().isBlank() && !r.body().contains("<") ? r.body().trim() : null;
+        return crumb;
+    }
+
+    /**
+     * Real company fundamentals from Yahoo's quoteSummary. Metric keys match
+     * {@link com.parakh.common.analysis.SetupEvaluator#canonicalMetric}. Returns {@code null} when unavailable.
+     */
+    public Map<String, Object> getFundamentals(String symbol) {
+        String norm = normalizeSymbol(symbol);
+        String modules = "price,summaryDetail,defaultKeyStatistics,financialData,assetProfile";
+        for (int attempt = 0; attempt < 2; attempt++) {
+            String c = crumb(attempt > 0);
+            if (c == null) return null;
+            String url = String.format("%s/v10/finance/quoteSummary/%s?modules=%s&crumb=%s", YF_HOST,
+                    URLEncoder.encode(norm, StandardCharsets.UTF_8), modules, URLEncoder.encode(c, StandardCharsets.UTF_8));
+            Resp r = send(url);
+            if (r.status() == 401 || r.status() == 403) continue;
+            if (r.status() != 200 || r.body() == null) return null;
+            try {
+                JsonNode root = objectMapper.readTree(r.body()).path("quoteSummary").path("result").path(0);
+                if (root.isMissingNode()) return null;
+                return parseFundamentals(norm, root);
+            } catch (Exception e) {
+                log.debug("Fundamentals parse failed for {}: {}", norm, e.getMessage());
+                return null;
+            }
         }
         return null;
     }
 
-    public Map<String, Object> searchSymbol(String query) {
-        if (query == null || query.isBlank()) {
-            return Map.of("count", 0, "result", List.of());
-        }
+    private Map<String, Object> parseFundamentals(String symbol, JsonNode root) {
+        JsonNode price = root.path("price"), sd = root.path("summaryDetail"), ks = root.path("defaultKeyStatistics"),
+                fd = root.path("financialData"), ap = root.path("assetProfile");
+        Map<String, Double> m = new LinkedHashMap<>();
+        put(m, "pe_ratio", raw(sd, "trailingPE"), 1);
+        put(m, "forward_pe", raw(sd, "forwardPE"), 1);
+        put(m, "pb_ratio", raw(ks, "priceToBook"), 1);
+        put(m, "peg_ratio", raw(ks, "pegRatio"), 1);
+        put(m, "eps", raw(ks, "trailingEps"), 1);
+        put(m, "roe", raw(fd, "returnOnEquity"), 100);
+        put(m, "roa", raw(fd, "returnOnAssets"), 100);
+        put(m, "debt_to_equity", raw(fd, "debtToEquity"), 0.01); // Yahoo reports D/E as a percentage
+        Double cap = raw(price, "marketCap");
+        put(m, "market_cap_cr", cap, 1e-7);
+        put(m, "market_cap_bn", cap, 1e-9);
+        put(m, "dividend_yield", raw(sd, "dividendYield"), 100);
+        put(m, "profit_margin", raw(fd, "profitMargins"), 100);
+        put(m, "revenue_growth", raw(fd, "revenueGrowth"), 100);
+        put(m, "earnings_growth", raw(fd, "earningsGrowth"), 100);
+        put(m, "current_ratio", raw(fd, "currentRatio"), 1);
+        put(m, "beta", raw(sd, "beta"), 1);
+        put(m, "avg_volume", raw(sd, "averageVolume"), 1);
+        Double hi = raw(sd, "fiftyTwoWeekHigh"), last = raw(price, "regularMarketPrice");
+        if (hi != null && last != null && hi > 0) m.put("pct_from_52w_high", Math.round((hi - last) / hi * 10000) / 100.0);
 
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("symbol", symbol);
+        out.put("name", price.path("longName").asText(price.path("shortName").asText(symbol)));
+        out.put("currency", price.path("currency").asText(""));
+        out.put("sector", ap.path("sector").asText(""));
+        out.put("industry", ap.path("industry").asText(""));
+        out.put("metrics", m);
+        out.put("asOf", Instant.now().getEpochSecond());
+        out.put("source", "Yahoo Finance");
+        return out;
+    }
+
+    private static Double raw(JsonNode parent, String field) {
+        JsonNode n = parent.path(field);
+        if (n.isNumber()) return n.asDouble();
+        JsonNode r = n.path("raw");
+        return r.isNumber() ? r.asDouble() : null;
+    }
+
+    private static void put(Map<String, Double> m, String key, Double v, double scale) {
+        if (v == null || v.isNaN() || v.isInfinite()) return;
+        m.put(key, Math.round(v * scale * 100.0) / 100.0);
+    }
+
+    // ─── Search ─────────────────────────────────────────────────────────────────
+
+    public Map<String, Object> searchSymbol(String query) {
+        if (query == null || query.isBlank()) return Map.of("count", 0, "result", List.of());
         String qClean = query.trim();
         String qUpper = qClean.toUpperCase();
         Map<String, Map<String, String>> resultMap = new LinkedHashMap<>();
 
-        // 1. Instant autocomplete match from curated Indian equity master
-        for (Map.Entry<String, String> entry : INDIAN_EQUITY_MASTER.entrySet()) {
-            String ticker = entry.getKey();
-            String name = entry.getValue();
-            if (ticker.contains(qUpper) || name.toUpperCase().contains(qUpper)) {
-                String sym = ticker + ".NS";
-                resultMap.put(sym, Map.of(
-                        "description", name,
-                        "displaySymbol", sym,
-                        "symbol", sym,
-                        "type", "EQUITY",
-                        "exchange", "NSI"
-                ));
+        for (Map.Entry<String, String> e : IndianEquityMaster.TICKERS.entrySet()) {
+            if (e.getKey().startsWith(qUpper) || e.getValue().toUpperCase().contains(qUpper)) {
+                String sym = e.getKey() + ".NS";
+                resultMap.put(sym, entry(sym, e.getValue(), "EQUITY", "NSE"));
             }
         }
 
-        // 2. Fetch live suggestions from Yahoo Finance search API (global stocks, cryptos, foreign equities)
         try {
-            String url = String.format("%s/v1/finance/search?q=%s&quotesCount=20&newsCount=0",
+            String url = String.format("%s/v1/finance/search?q=%s&quotesCount=15&newsCount=0&enableFuzzyQuery=false",
                     YF_HOST, URLEncoder.encode(qClean, StandardCharsets.UTF_8));
-
             String response = executeGet(url);
             if (response != null) {
-                JsonNode root = objectMapper.readTree(response);
-                JsonNode quotes = root.path("quotes");
-                if (quotes.isArray()) {
-                    for (JsonNode item : quotes) {
-                        String sym = item.path("symbol").asText("");
-                        if (sym.isBlank()) continue;
-
-                        String shortName = item.path("shortname").asText("");
-                        String longName = item.path("longname").asText("");
-                        String desc = !shortName.isBlank() ? shortName : (!longName.isBlank() ? longName : sym);
-                        String type = item.path("quoteType").asText("EQUITY");
-                        String exch = item.path("exchange").asText("");
-
-                        // Add to results if not already present
-                        if (!resultMap.containsKey(sym)) {
-                            resultMap.put(sym, Map.of(
-                                    "description", desc,
-                                    "displaySymbol", sym,
-                                    "symbol", sym,
-                                    "type", type,
-                                    "exchange", exch
-                            ));
-                        }
-                    }
+                for (JsonNode item : objectMapper.readTree(response).path("quotes")) {
+                    String sym = item.path("symbol").asText("");
+                    if (sym.isBlank() || resultMap.containsKey(sym)) continue;
+                    String desc = item.path("shortname").asText(item.path("longname").asText(sym));
+                    String exch = item.path("exchDisp").asText(item.path("exchange").asText(""));
+                    resultMap.put(sym, entry(sym, desc, item.path("quoteType").asText("EQUITY"), exch));
                 }
             }
         } catch (Exception e) {
-            log.warn("Yahoo search API failed for query '{}': {}", qClean, e.getMessage());
+            log.debug("Yahoo search failed for '{}': {}", qClean, e.getMessage());
         }
 
-        // 3. If query is a plain ticker without dots and not in results, verify if {qUpper}.NS has quote
-        if (!qUpper.contains(".") && !qUpper.contains("-") && !resultMap.containsKey(qUpper + ".NS")) {
-            Map<String, Object> testNs = fetchYahooQuote(qUpper + ".NS");
-            if (testNs != null && testNs.containsKey("c")) {
-                resultMap.put(qUpper + ".NS", Map.of(
-                        "description", qUpper + " (NSE India)",
-                        "displaySymbol", qUpper + ".NS",
-                        "symbol", qUpper + ".NS",
-                        "type", "EQUITY",
-                        "exchange", "NSI"
-                ));
-            }
-        }
-
-        // 4. Sort results: Indian stocks first (.NS, .BO, NSI, BSE), then exact matches, then global stocks
         List<Map<String, String>> sorted = new ArrayList<>(resultMap.values());
-        sorted.sort((a, b) -> {
-            String symA = a.getOrDefault("symbol", "");
-            String symB = b.getOrDefault("symbol", "");
-            String exchA = a.getOrDefault("exchange", "");
-            String exchB = b.getOrDefault("exchange", "");
-
-            boolean aIndian = symA.endsWith(".NS") || symA.endsWith(".BO") || "NSI".equalsIgnoreCase(exchA) || "BSE".equalsIgnoreCase(exchA);
-            boolean bIndian = symB.endsWith(".NS") || symB.endsWith(".BO") || "NSI".equalsIgnoreCase(exchB) || "BSE".equalsIgnoreCase(exchB);
-
-            if (aIndian && !bIndian) return -1;
-            if (!aIndian && bIndian) return 1;
-
-            boolean aExact = symA.equalsIgnoreCase(qUpper) || symA.equalsIgnoreCase(qUpper + ".NS");
-            boolean bExact = symB.equalsIgnoreCase(qUpper) || symB.equalsIgnoreCase(qUpper + ".NS");
-            if (aExact && !bExact) return -1;
-            if (!aExact && bExact) return 1;
-
-            return 0;
-        });
-
-        // Limit suggestions to top 15
-        if (sorted.size() > 15) {
-            sorted = sorted.subList(0, 15);
-        }
-
+        sorted.sort(Comparator
+                .comparing((Map<String, String> a) -> !(a.get("symbol").equalsIgnoreCase(qUpper) || a.get("symbol").equalsIgnoreCase(qUpper + ".NS")))
+                .thenComparing(a -> !isIndian(a.get("symbol"))));
+        if (sorted.size() > 15) sorted = sorted.subList(0, 15);
         return Map.of("count", sorted.size(), "result", sorted);
     }
 
-    private Map<String, Object> generateMockCandles(long from, long to, double startPrice) {
-        List<Long> t = new ArrayList<>();
-        List<Double> o = new ArrayList<>();
-        List<Double> h = new ArrayList<>();
-        List<Double> l = new ArrayList<>();
-        List<Double> c = new ArrayList<>();
-        List<Long> v = new ArrayList<>();
+    private static boolean isIndian(String sym) {
+        return sym.endsWith(".NS") || sym.endsWith(".BO");
+    }
 
-        double price = startPrice;
-        long step = 86400L;
-        Random rng = new Random(from);
-
-        for (long time = from; time <= to; time += step) {
-            t.add(time);
-            double vol = price * 0.035;
-            double open = price;
-            double high = open + rng.nextDouble() * vol;
-            double low = Math.max(1.0, open - rng.nextDouble() * vol);
-            double close = low + rng.nextDouble() * (high - low);
-
-            o.add(Math.round(open * 100.0) / 100.0);
-            h.add(Math.round(high * 100.0) / 100.0);
-            l.add(Math.round(low * 100.0) / 100.0);
-            c.add(Math.round(close * 100.0) / 100.0);
-            v.add(50000L + rng.nextInt(500000));
-
-            price = close;
-        }
-
-        return Map.of("t", t, "o", o, "h", h, "l", l, "c", c, "v", v, "s", "ok");
+    private static Map<String, String> entry(String sym, String desc, String type, String exch) {
+        return Map.of("symbol", sym, "displaySymbol", sym, "description", desc, "type", type, "exchange", exch);
     }
 }

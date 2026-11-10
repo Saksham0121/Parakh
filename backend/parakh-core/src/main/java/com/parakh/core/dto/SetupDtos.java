@@ -16,7 +16,9 @@ public class SetupDtos {
         List<TechnicalConditionDto> technicalConditions,
         List<FundamentalConditionDto> fundamentalConditions,
         String fundamentalMode,
-        OrderRuleDto orderRule
+        OrderRuleDto orderRule,
+        String timeframe,
+        List<String> universe
     ) {}
 
     public record UpdateSetupRequest(
@@ -24,7 +26,9 @@ public class SetupDtos {
         List<TechnicalConditionDto> technicalConditions,
         List<FundamentalConditionDto> fundamentalConditions,
         String fundamentalMode,
-        OrderRuleDto orderRule
+        OrderRuleDto orderRule,
+        String timeframe,
+        List<String> universe
     ) {}
 
     public record SetupMatchResponse(
@@ -46,6 +50,8 @@ public class SetupDtos {
         List<FundamentalConditionDto> fundamentalConditions,
         String fundamentalMode,
         OrderRuleDto orderRule,
+        String timeframe,
+        List<String> universe,
         Instant createdAt,
         Instant updatedAt,
         List<SetupMatchResponse> setupMatches

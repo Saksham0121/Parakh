@@ -36,19 +36,6 @@ public class WebSocketKafkaBridge {
         }
     }
 
-    @KafkaListener(topics = KafkaTopics.INDICATOR_UPDATES, groupId = "ws-core-indicator-group")
-    public void onIndicatorUpdate(String message) {
-        try {
-            Map<String, Object> update = objectMapper.readValue(message, new TypeReference<>() {});
-            String symbol = (String) update.get("symbol");
-            if (symbol != null) {
-                eventHandler.broadcastToSymbolRoom(symbol, "indicator:update", update);
-            }
-        } catch (Exception e) {
-            log.error("Failed to broadcast indicator update: {}", e.getMessage());
-        }
-    }
-
     @KafkaListener(topics = KafkaTopics.ALERT_FIRED, groupId = "ws-core-alert-group")
     public void onAlertFired(String message) {
         try {

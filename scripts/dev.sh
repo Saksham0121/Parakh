@@ -107,7 +107,7 @@ if [ "$INCLUDE_FRONTEND" = true ]; then
     -c "green,cyan,magenta" \
     "mvn -f backend spring-boot:run -pl parakh-core" \
     "mvn -f backend spring-boot:run -pl parakh-engine" \
-    "npm run dev -w @parakh/frontend"
+    "npm run dev -w frontend"
 else
   npx concurrently -k \
     -n "core,engine" \

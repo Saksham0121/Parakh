@@ -1,5 +1,9 @@
 server:
   port: 8082
+  compression:
+    enabled: true
+    mime-types: application/json
+    min-response-size: 2048
 
 spring:
   application:
@@ -14,10 +18,10 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:parakh_secret}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
+      maximum-pool-size: 35
+      minimum-idle: 10
       idle-timeout: 300000
-      connection-timeout: 20000
+      connection-timeout: 3000
 
   jpa:
     open-in-view: false
@@ -45,6 +49,21 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Never let a Kafka outage stall the price poller or the setup monitor.
+      properties:
+        max.block.ms: 2000
+        linger.ms: 5
+
+jwt:
+  secret: ${JWT_SECRET:parakh_secret}
+
+parakh:
+  market:
+    poll-interval-ms: ${MARKET_POLL_INTERVAL_MS:5000}
+  scanner:
+    enabled: ${SCANNER_ENABLED:true}
+    interval-ms: ${SCANNER_INTERVAL_MS:60000}
+    initial-delay-ms: 20000
 
 logging:
   level:

@@ -14,6 +14,7 @@ const DEFAULT_WATCHLIST: WatchlistItem[] = [
   { symbol: 'TCS.NS' },
   { symbol: 'HDFCBANK.NS' },
   { symbol: 'INFY.NS' },
+  { symbol: 'ICICIBANK.NS' },
 ];
 
 function loadFromStorage(): WatchlistItem[] {

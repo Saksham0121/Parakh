@@ -48,6 +48,15 @@ public class Setup {
     @Column(name = "order_rule", columnDefinition = "jsonb")
     private OrderRuleDto orderRule;
 
+    /** Candle resolution the setup is evaluated on (D, W, 60, 15 ...). */
+    @Column(name = "timeframe", nullable = false, length = 8)
+    private String timeframe = "D";
+
+    /** Symbols scanned for this setup; empty means "the owner's watchlist". */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "universe", columnDefinition = "jsonb")
+    private List<String> universe = new ArrayList<>();
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
@@ -85,6 +94,12 @@ public class Setup {
 
     public OrderRuleDto getOrderRule() { return orderRule; }
     public void setOrderRule(OrderRuleDto orderRule) { this.orderRule = orderRule; }
+
+    public String getTimeframe() { return timeframe == null || timeframe.isBlank() ? "D" : timeframe; }
+    public void setTimeframe(String timeframe) { this.timeframe = timeframe; }
+
+    public List<String> getUniverse() { return universe; }
+    public void setUniverse(List<String> universe) { this.universe = universe; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

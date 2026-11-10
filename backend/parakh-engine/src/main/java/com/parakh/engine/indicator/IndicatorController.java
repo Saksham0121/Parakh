@@ -2,7 +2,6 @@ package com.parakh.engine.indicator;
 
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -16,17 +15,8 @@ public class IndicatorController {
     }
 
     @GetMapping("/{symbol}")
-    public Map<String, Object> getAllIndicators(@PathVariable String symbol) {
-        return indicatorEngineService.getAllIndicators(symbol);
-    }
-
-    @GetMapping("/{symbol}/{type}")
-    public Map<String, Object> getIndicator(
-            @PathVariable String symbol,
-            @PathVariable String type,
-            @RequestParam(required = false) Integer period) {
-        Map<String, Object> params = new HashMap<>();
-        if (period != null) params.put("period", period);
-        return indicatorEngineService.getLatestIndicator(symbol, type, params);
+    public Map<String, Object> snapshot(@PathVariable String symbol,
+                                        @RequestParam(defaultValue = "D") String resolution) {
+        return indicatorEngineService.snapshot(symbol, resolution);
     }
 }

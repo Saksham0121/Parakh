@@ -24,7 +24,7 @@ public class AlertController {
     public List<Map<String, Object>> getUserAlerts(@AuthenticationPrincipal String userId) {
         List<SetupMatch> matches = setupMatchRepository.findTop50ByUserIdOrderByMatchedAtDesc(userId);
         return matches.stream()
-                .map(m -> Map.of(
+                .map(m -> Map.<String, Object>of(
                         "id", m.getId(),
                         "setupId", m.getSetup().getId(),
                         "setupName", m.getSetup().getName(),
