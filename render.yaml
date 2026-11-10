@@ -2,7 +2,7 @@
 # Everything here is on Render's free plans:
 #   parakh-api   Docker web service: core + engine in one JVM (uses free instance hours)
 #   parakh-web   Static site: React build served from Render's CDN (doesn't use instance hours)
-#   parakh-db    Postgres (free databases expire after 30 days; see README for free alternatives)
+#   Database     a free Neon Postgres (doesn't expire); you paste its URL as DATABASE_URL
 #   parakh-cache Key Value (Redis-compatible) shared cache; optional, the API runs without it
 #
 # Free web services share 750 instance-hours per workspace per month and sleep after
@@ -23,10 +23,10 @@ services:
         - backend/**
         - Dockerfile
     envVars:
+      # Neon connection string, e.g. postgresql://user:pass@ep-xxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+      # Render asks for it on first deploy; change it later under parakh-api → Environment.
       - key: DATABASE_URL
-        fromDatabase:
-          name: parakh-db
-          property: connectionString
+        sync: false
       - key: REDIS_URL
         fromService:
           type: keyvalue
@@ -62,7 +62,7 @@ services:
       # If Render gives the API a different hostname, update this destination.
       - type: rewrite
         source: /api/*
-        destination: https://parakh-api.onrender.com/api/*
+        destination: https://parakh-api-u0dl.onrender.com/api/*
       - type: rewrite
         source: /*
         destination: /index.html
@@ -73,10 +73,3 @@ services:
     region: singapore
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
-
-databases:
-  - name: parakh-db
-    plan: free
-    region: singapore
-    databaseName: parakh
-    user: parakh

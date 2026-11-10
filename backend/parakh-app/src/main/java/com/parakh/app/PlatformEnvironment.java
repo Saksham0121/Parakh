@@ -30,7 +30,7 @@ public class PlatformEnvironment implements EnvironmentPostProcessor {
         if (hasText(db) && !hasText(env.getProperty("SPRING_DATASOURCE_URL"))) {
             URI uri = URI.create(db.replaceFirst("^postgres(ql)?://", "http://"));
             int port = uri.getPort() > 0 ? uri.getPort() : 5432;
-            String query = uri.getRawQuery() != null ? "?" + uri.getRawQuery() : "";
+            String query = jdbcQuery(uri.getRawQuery());
             props.put("spring.datasource.url", "jdbc:postgresql://" + uri.getHost() + ":" + port + uri.getRawPath() + query);
             String userInfo = uri.getRawUserInfo();
             if (userInfo != null) {
@@ -49,6 +49,22 @@ public class PlatformEnvironment implements EnvironmentPostProcessor {
         }
 
         if (!props.isEmpty()) env.getPropertySources().addFirst(new MapPropertySource("platformEnvironment", props));
+    }
+
+    /**
+     * Keeps parameters the PostgreSQL JDBC driver understands (e.g. {@code sslmode=require}) and drops ones
+     * that only libpq or Prisma know, such as Neon's {@code channel_binding=require} or {@code schema=public}.
+     */
+    static String jdbcQuery(String rawQuery) {
+        if (rawQuery == null || rawQuery.isBlank()) return "";
+        java.util.List<String> kept = new java.util.ArrayList<>();
+        for (String part : rawQuery.split("&")) {
+            String key = part.split("=", 2)[0].toLowerCase();
+            if (key.isEmpty() || key.equals("channel_binding") || key.equals("schema") || key.equals("pgbouncer")
+                    || key.equals("connection_limit") || key.equals("pool_timeout")) continue;
+            kept.add(part);
+        }
+        return kept.isEmpty() ? "" : "?" + String.join("&", kept);
     }
 
     private static boolean hasText(String s) {
