@@ -31,7 +31,6 @@ import java.util.function.Supplier;
 public class TieredCache {
 
     private static final Logger log = LoggerFactory.getLogger(TieredCache.class);
-    private static final int L1_MAX_ENTRIES = 5_000;
     private static final String NULL_MARKER = "__null__";
     private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {};
 
@@ -48,9 +47,16 @@ public class TieredCache {
     private final ObjectMapper mapper;
     private volatile long redisRetryAt = 0;
 
-    public TieredCache(StringRedisTemplate redis, ObjectMapper mapper) {
+    private final boolean redisEnabled;
+    private final int l1MaxEntries;
+
+    public TieredCache(StringRedisTemplate redis, ObjectMapper mapper,
+                       @org.springframework.beans.factory.annotation.Value("${parakh.redis.enabled:true}") boolean redisEnabled,
+                       @org.springframework.beans.factory.annotation.Value("${parakh.cache.l1-max-entries:5000}") int l1MaxEntries) {
         this.redis = redis;
         this.mapper = mapper;
+        this.redisEnabled = redisEnabled;
+        this.l1MaxEntries = Math.max(50, l1MaxEntries);
     }
 
     public Map<String, Object> get(String key, Duration ttl, Duration negativeTtl, Supplier<Map<String, Object>> loader) {
@@ -108,7 +114,7 @@ public class TieredCache {
     }
 
     private void putL1(String key, Map<String, Object> value, Duration ttl) {
-        if (l1.size() >= L1_MAX_ENTRIES) evictExpired();
+        if (l1.size() >= l1MaxEntries) evictExpired();
         long now = System.currentTimeMillis();
         long life = ttl.toMillis();
         l1.put(key, new Entry(value, now + life, now + Math.max(life * 6, 60_000)));
@@ -117,9 +123,9 @@ public class TieredCache {
     private void evictExpired() {
         long now = System.currentTimeMillis();
         l1.values().removeIf(en -> en.staleUntil() <= now);
-        if (l1.size() >= L1_MAX_ENTRIES) {
+        if (l1.size() >= l1MaxEntries) {
             Iterator<String> it = l1.keySet().iterator();
-            for (int i = 0; i < L1_MAX_ENTRIES / 10 && it.hasNext(); i++) {
+            for (int i = 0; i < l1MaxEntries / 10 && it.hasNext(); i++) {
                 it.next();
                 it.remove();
             }
@@ -127,7 +133,7 @@ public class TieredCache {
     }
 
     private Map<String, Object> readL2(String key) {
-        if (System.currentTimeMillis() < redisRetryAt) return null;
+        if (!redisEnabled || System.currentTimeMillis() < redisRetryAt) return null;
         try {
             String raw = redis.opsForValue().get(key);
             if (raw == null) return null;
@@ -140,7 +146,7 @@ public class TieredCache {
     }
 
     private void writeL2(String key, Map<String, Object> value, Duration ttl) {
-        if (System.currentTimeMillis() < redisRetryAt) return;
+        if (!redisEnabled || System.currentTimeMillis() < redisRetryAt) return;
         try {
             redis.opsForValue().set(key, value == null ? NULL_MARKER : mapper.writeValueAsString(value), ttl);
         } catch (Exception ex) {

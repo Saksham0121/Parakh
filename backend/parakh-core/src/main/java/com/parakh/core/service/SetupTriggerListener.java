@@ -6,7 +6,10 @@ import com.parakh.common.constants.KafkaTopics;
 import com.parakh.common.domain.SetupMatch;
 import com.parakh.core.repository.SetupMatchRepository;
 import com.parakh.core.repository.SetupRepository;
+import com.parakh.common.messaging.BusMessage;
 import com.parakh.core.websocket.SocketIOEventHandler;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.event.EventListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -28,15 +31,21 @@ public class SetupTriggerListener {
 
     private final SetupRepository setupRepository;
     private final SetupMatchRepository matchRepository;
-    private final SocketIOEventHandler sockets;
+    private final ObjectProvider<SocketIOEventHandler> sockets;
     private final ObjectMapper mapper;
 
     public SetupTriggerListener(SetupRepository setupRepository, SetupMatchRepository matchRepository,
-                                SocketIOEventHandler sockets, ObjectMapper mapper) {
+                                ObjectProvider<SocketIOEventHandler> sockets, ObjectMapper mapper) {
         this.setupRepository = setupRepository;
         this.matchRepository = matchRepository;
         this.sockets = sockets;
         this.mapper = mapper;
+    }
+
+    /** Single-process deployments deliver the same event without Kafka. */
+    @EventListener(condition = "#msg.topic() == 'setup-triggered'")
+    public void onInProcess(BusMessage msg) {
+        onSetupTriggered(msg.payload());
     }
 
     @KafkaListener(topics = KafkaTopics.SETUP_TRIGGERED, groupId = "setup-trigger-core-group")
@@ -68,7 +77,7 @@ public class SetupTriggerListener {
             Map<String, Object> alert = new LinkedHashMap<>(event);
             alert.put("id", match.getId());
             alert.put("matchedAt", match.getMatchedAt().toString());
-            sockets.broadcastToUser(userId, "alert:fired", alert);
+            sockets.ifAvailable(s -> s.broadcastToUser(userId, "alert:fired", alert));
             log.info("Setup '{}' matched {}", setup.getName(), match.getSymbol());
         } catch (Exception e) {
             log.error("Failed to record setup trigger: {}", e.getMessage());

@@ -8,6 +8,8 @@ interface AlertState {
   unread: number;
   loaded: boolean;
   load: () => Promise<void>;
+  /** Fetches alerts and toasts any that are new since the last fetch (used when there is no socket). */
+  poll: () => Promise<void>;
   markRead: () => void;
   pushLive: (raw: Record<string, unknown>) => void;
 }
@@ -22,6 +24,21 @@ export const useAlertStore = create<AlertState>((set, get) => ({
       set({ alerts, loaded: true });
     } catch {
       set({ loaded: true });
+    }
+  },
+  poll: async () => {
+    try {
+      const latest = await api.getAlerts();
+      const known = new Set(get().alerts.map((a) => a.id));
+      const fresh = get().loaded ? latest.filter((a) => !known.has(a.id)) : [];
+      set((s) => ({ alerts: latest, loaded: true, unread: s.unread + fresh.length }));
+      if (fresh.length === 1) {
+        useToastStore.getState().push({ title: `${fresh[0].setupName} matched`, body: `${fresh[0].symbol} met every condition of your setup.`, tone: 'up' });
+      } else if (fresh.length > 1) {
+        useToastStore.getState().push({ title: `${fresh.length} new setup matches`, body: 'Open Alerts to see which stocks matched.', tone: 'up' });
+      }
+    } catch {
+      /* offline or asleep: try again next tick */
     }
   },
   markRead: () => set({ unread: 0 }),

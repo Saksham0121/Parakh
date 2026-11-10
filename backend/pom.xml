@@ -22,6 +22,7 @@
         <module>parakh-common</module>
         <module>parakh-core</module>
         <module>parakh-engine</module>
+        <module>parakh-app</module>
     </modules>
 
     <properties>

@@ -29,6 +29,7 @@ public class WatchlistService {
     private final UserRepository userRepository;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final boolean redisEnabled;
 
     private final AtomicLong hits = new AtomicLong(0);
     private final AtomicLong misses = new AtomicLong(0);
@@ -36,7 +37,9 @@ public class WatchlistService {
     public WatchlistService(WatchlistRepository watchlistRepository,
                             UserRepository userRepository,
                             StringRedisTemplate redisTemplate,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            @org.springframework.beans.factory.annotation.Value("${parakh.redis.enabled:true}") boolean redisEnabled) {
+        this.redisEnabled = redisEnabled;
         this.watchlistRepository = watchlistRepository;
         this.userRepository = userRepository;
         this.redisTemplate = redisTemplate;
@@ -46,7 +49,7 @@ public class WatchlistService {
     public List<WatchlistItemResponse> getWatchlist(String userId) {
         String cacheKey = "watchlist:" + userId;
 
-        try {
+        if (redisEnabled) try {
             String cached = redisTemplate.opsForValue().get(cacheKey);
             if (cached != null) {
                 hits.incrementAndGet();
@@ -75,7 +78,7 @@ public class WatchlistService {
                 .map(w -> new WatchlistItemResponse(w.getId(), userId, w.getSymbol()))
                 .toList();
 
-        try {
+        if (redisEnabled) try {
             redisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(response), Duration.ofSeconds(10));
         } catch (Exception e) {
             log.warn("Redis write error for key {}: {}", cacheKey, e.getMessage());
@@ -99,7 +102,7 @@ public class WatchlistService {
         Watchlist created = watchlistRepository.save(new Watchlist(user, symbol));
 
         // Invalidate cache
-        try {
+        if (redisEnabled) try {
             redisTemplate.delete("watchlist:" + userId);
         } catch (Exception ignored) {}
 
@@ -112,7 +115,7 @@ public class WatchlistService {
         watchlistRepository.deleteByUserIdAndSymbol(userId, symbol);
 
         // Invalidate cache
-        try {
+        if (redisEnabled) try {
             redisTemplate.delete("watchlist:" + userId);
         } catch (Exception ignored) {}
     }

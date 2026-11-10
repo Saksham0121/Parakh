@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "parakh.realtime.enabled", havingValue = "true", matchIfMissing = true)
 @Component
 public class SocketIOEventHandler {
 

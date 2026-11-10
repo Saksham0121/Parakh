@@ -101,6 +101,8 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
                     <mainClass>com.parakh.engine.ParakhEngineApplication</mainClass>
+                    <!-- Keep the plain jar as the main artifact so parakh-app can depend on it. -->
+                    <classifier>exec</classifier>
                 </configuration>
             </plugin>
         </plugins>

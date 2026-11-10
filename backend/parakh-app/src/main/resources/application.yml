@@ -1,0 +1,128 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# parakh-app: core + engine in one JVM, sized for small hosts (Render free:
+# 512 MB RAM, 0.1 CPU, one public port, no Kafka). Every value can be
+# overridden with an environment variable.
+#
+# Platform URLs are understood directly (see PlatformEnvironment):
+#   DATABASE_URL=postgres://user:pass@host:5432/db   REDIS_URL=redis://host:6379
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json
+    min-response-size: 2048
+  tomcat:
+    max-connections: 2000
+    accept-count: 50
+
+spring:
+  application:
+    name: parakh
+  main:
+    banner-mode: off
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 10s
+
+  # No broker on the free tier: engine → core events are delivered in-process.
+  autoconfigure:
+    exclude: ${SPRING_AUTOCONFIGURE_EXCLUDE:org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration}
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/parakh}
+    username: ${SPRING_DATASOURCE_USERNAME:parakh}
+    password: ${SPRING_DATASOURCE_PASSWORD:parakh_secret}
+    hikari:
+      # Free Postgres tiers allow few connections; virtual threads queue cheaply instead.
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      minimum-idle: 1
+      idle-timeout: 120000
+      connection-timeout: 10000
+      max-lifetime: 600000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.batch_size: 50
+        order_inserts: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 1500ms
+    jpa:
+      repositories:
+        bootstrap-mode: default
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        max.block.ms: 2000
+    consumer:
+      group-id: parakh-app
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+jwt:
+  secret: ${JWT_SECRET:parakh_secret}
+  expiration: 604800000
+
+websocket:
+  port: ${WEBSOCKET_PORT:3009}
+
+parakh:
+  messaging:
+    mode: ${MESSAGING_MODE:inprocess}       # inprocess | kafka
+  realtime:
+    # Socket.IO needs its own port, which single-port hosts can't expose; the UI polls instead.
+    enabled: ${REALTIME_ENABLED:false}
+  redis:
+    enabled: ${REDIS_ENABLED:false}         # set automatically when REDIS_URL is present
+  cache:
+    l1-max-entries: ${CACHE_L1_MAX_ENTRIES:400}
+  market:
+    poll-interval-ms: ${MARKET_POLL_INTERVAL_MS:15000}
+    # 0.1 vCPU makes TLS handshakes and JSON parsing slow; give upstream calls more time.
+    http-timeout-ms: ${MARKET_HTTP_TIMEOUT_MS:25000}
+  scanner:
+    enabled: ${SCANNER_ENABLED:true}
+    interval-ms: ${SCANNER_INTERVAL_MS:120000}
+    initial-delay-ms: 30000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    redis:
+      enabled: ${REDIS_ENABLED:false}
+
+logging:
+  level:
+    root: WARN
+    com.parakh: INFO
+    org.springframework.boot.web.embedded: INFO
+    org.flywaydb: INFO

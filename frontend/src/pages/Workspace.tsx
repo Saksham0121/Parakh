@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, ChartCandlestick, FlaskConical, ListChecks, LogOut, PanelRight, Radar, Search, Star } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { useSocketStore } from '../store/socketStore';
+import { REALTIME, useSocketStore } from '../store/socketStore';
 import { useWatchlistStore } from '../store/watchlistStore';
 import { useUiStore, type View } from '../store/uiStore';
 import { useAlertStore } from '../store/alertStore';
@@ -45,7 +45,9 @@ export default function Workspace() {
     fetchWatchlist();
     useAlertStore.getState().load();
     useSetupStore.getState().load();
-    return () => disconnect();
+    // Without a socket, alerts arrive by polling (cheap: one small query per minute).
+    const alertTimer = REALTIME ? undefined : window.setInterval(() => useAlertStore.getState().poll(), 60_000);
+    return () => { disconnect(); if (alertTimer) window.clearInterval(alertTimer); };
   }, [connect, disconnect, fetchWatchlist]);
 
   // One batched quote request for the whole watchlist + live room subscriptions; refreshed every 15s
@@ -55,7 +57,7 @@ export default function Workspace() {
     symbols.forEach((s) => { subscribeSymbol(s); api.subscribeMarket(s).catch(() => {}); });
     const refresh = () => api.getQuotes(symbols).then(applyQuotes).catch(() => {});
     refresh();
-    const id = window.setInterval(refresh, 15_000);
+    const id = window.setInterval(refresh, REALTIME ? 15_000 : 10_000);
     return () => window.clearInterval(id);
   }, [watchlist, symbol, subscribeSymbol, applyQuotes]);
 

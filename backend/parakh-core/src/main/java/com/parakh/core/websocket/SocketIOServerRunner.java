@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "parakh.realtime.enabled", havingValue = "true", matchIfMissing = true)
 @Component
 public class SocketIOServerRunner implements CommandLineRunner, AutoCloseable {
 

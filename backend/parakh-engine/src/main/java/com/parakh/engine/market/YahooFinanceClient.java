@@ -49,14 +49,20 @@ public class YahooFinanceClient {
     private volatile long coolDownUntil = 0;
     private volatile long coolDownMs = 15_000;
     private volatile String crumb;
+    private final java.util.concurrent.locks.ReentrantLock crumbLock = new java.util.concurrent.locks.ReentrantLock();
 
-    public YahooFinanceClient(ObjectMapper objectMapper) {
+    /** Per-request upstream timeout; small CPU-starved instances need longer for TLS and parsing. */
+    private final Duration requestTimeout;
+
+    public YahooFinanceClient(ObjectMapper objectMapper,
+                              @org.springframework.beans.factory.annotation.Value("${parakh.market.http-timeout-ms:10000}") long timeoutMs) {
         this.objectMapper = objectMapper;
+        this.requestTimeout = Duration.ofMillis(Math.max(2000, timeoutMs));
         CookieManager cookies = new CookieManager();
         cookies.setCookiePolicy(CookiePolicy.ACCEPT_ALL);
         this.httpClient = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NORMAL)
-                .connectTimeout(Duration.ofSeconds(5))
+                .connectTimeout(Duration.ofMillis(Math.max(5000, this.requestTimeout.toMillis() / 2)))
                 .cookieHandler(cookies)
                 .executor(VT)
                 .build();
@@ -75,7 +81,7 @@ public class YahooFinanceClient {
                     .uri(URI.create(url))
                     .header("User-Agent", USER_AGENT)
                     .header("Accept", "application/json, text/plain, */*")
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(requestTimeout)
                     .GET()
                     .build();
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
@@ -151,7 +157,7 @@ public class YahooFinanceClient {
         final long start = p1;
         var ns = CompletableFuture.supplyAsync(() -> fetchYahooCandles(norm + ".NS", resolution, start, p2), VT);
         var bo = CompletableFuture.supplyAsync(() -> fetchYahooCandles(norm + ".BO", resolution, start, p2), VT);
-        Map<String, Object> nsData = await(ns, 10_000);
+        Map<String, Object> nsData = await(ns, requestTimeout.toMillis());
         return nsData != null ? nsData : await(bo, 2_000);
     }
 
@@ -266,13 +272,23 @@ public class YahooFinanceClient {
 
     // ─── Fundamentals ───────────────────────────────────────────────────────────
 
-    private synchronized String crumb(boolean refresh) {
+    /**
+     * Not {@code synchronized}: on Java 21 a virtual thread blocked inside a monitor pins its carrier,
+     * and with one CPU (small containers) that starves the HTTP client's own tasks into timeouts.
+     */
+    private String crumb(boolean refresh) {
         if (crumb != null && !refresh) return crumb;
         if (isRateLimited()) return null;
-        send("https://fc.yahoo.com/"); // sets the consent cookie; a 404 here is expected
-        Resp r = send(YF_HOST + "/v1/test/getcrumb");
-        crumb = r.status() == 200 && r.body() != null && !r.body().isBlank() && !r.body().contains("<") ? r.body().trim() : null;
-        return crumb;
+        crumbLock.lock();
+        try {
+            if (crumb != null && !refresh) return crumb;
+            send("https://fc.yahoo.com/"); // sets the consent cookie; a 404 here is expected
+            Resp r = send(YF_HOST + "/v1/test/getcrumb");
+            crumb = r.status() == 200 && r.body() != null && !r.body().isBlank() && !r.body().contains("<") ? r.body().trim() : null;
+            return crumb;
+        } finally {
+            crumbLock.unlock();
+        }
     }
 
     /**

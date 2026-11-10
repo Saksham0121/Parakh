@@ -42,7 +42,10 @@ public class SecurityConfig {
                     "/api/auth/register",
                     "/api/auth/login",
                     "/actuator/**",
-                    "/socket.io/**"
+                    "/socket.io/**",
+                    // Public market data served by parakh-engine (relevant when both run in one process)
+                    "/api/market/**",
+                    "/api/indicators/**"
                 ).permitAll()
                 .anyRequest().authenticated()
             )

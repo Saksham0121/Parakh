@@ -89,7 +89,7 @@ public class ScannerService {
         List<SymbolResult> out = new ArrayList<>();
         futures.forEach((sym, f) -> {
             try {
-                out.add(f.get(45, TimeUnit.SECONDS));
+                out.add(f.get(90, TimeUnit.SECONDS));
             } catch (Exception e) {
                 f.cancel(true);
                 out.add(new SymbolResult(sym, false, false, false, false, null, null, null, List.of(), List.of(), "Timed out"));

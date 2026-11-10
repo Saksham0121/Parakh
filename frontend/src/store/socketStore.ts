@@ -24,6 +24,8 @@ interface SocketState {
 }
 
 let socket: Socket | null = null;
+/** Off on hosts that can't expose the Socket.IO port; the app falls back to polling. */
+export const REALTIME = import.meta.env.VITE_REALTIME !== 'false';
 const rooms = new Set<string>();
 
 // Ticks are coalesced and flushed once per animation frame: 50 symbols ticking at once cause one render, not 50.
@@ -63,7 +65,7 @@ export const useSocketStore = create<SocketState>((set, get) => {
     prices: {},
 
     connect: () => {
-      if (socket) return;
+      if (socket || !REALTIME) return;
       const token = useAuthStore.getState().token;
       // netty-socketio reads the token from the handshake query, not from the socket.io v4 `auth` payload.
       socket = io('/', { query: token ? { token } : {}, transports: ['websocket'], reconnectionDelayMax: 10_000 });

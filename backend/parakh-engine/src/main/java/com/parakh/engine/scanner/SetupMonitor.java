@@ -9,7 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.kafka.core.KafkaTemplate;
+import com.parakh.engine.events.EventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -30,21 +30,24 @@ public class SetupMonitor {
     private final SetupEngineRepository setups;
     private final WatchlistEngineRepository watchlists;
     private final ScannerService scanner;
-    private final KafkaTemplate<String, String> kafka;
+    private final EventPublisher events;
     private final StringRedisTemplate redis;
     private final ObjectMapper mapper;
     private final boolean enabled;
+    private final boolean redisEnabled;
 
     /** Local de-dupe; Redis SETNX de-dupes across engine replicas. */
     private final Map<String, Long> firedBars = new ConcurrentHashMap<>();
 
     public SetupMonitor(SetupEngineRepository setups, WatchlistEngineRepository watchlists, ScannerService scanner,
-                        KafkaTemplate<String, String> kafka, StringRedisTemplate redis, ObjectMapper mapper,
-                        @Value("${parakh.scanner.enabled:true}") boolean enabled) {
+                        EventPublisher events, StringRedisTemplate redis, ObjectMapper mapper,
+                        @Value("${parakh.scanner.enabled:true}") boolean enabled,
+                        @Value("${parakh.redis.enabled:true}") boolean redisEnabled) {
         this.setups = setups;
         this.watchlists = watchlists;
         this.scanner = scanner;
-        this.kafka = kafka;
+        this.events = events;
+        this.redisEnabled = redisEnabled;
         this.redis = redis;
         this.mapper = mapper;
         this.enabled = enabled;
@@ -90,6 +93,7 @@ public class SetupMonitor {
         Long previous = firedBars.get(key);
         if (previous != null && previous == barTime) return false;
         firedBars.put(key, barTime);
+        if (!redisEnabled) return true;
         try {
             Boolean fresh = redis.opsForValue().setIfAbsent("scan:fired:" + key + "|" + barTime, "1", Duration.ofDays(7));
             return !Boolean.FALSE.equals(fresh);
@@ -113,7 +117,7 @@ public class SetupMonitor {
             event.put("fundamental", r.fundamental());
             event.put("fundamentalsPassed", r.fundamentalsPassed());
             event.put("timestamp", System.currentTimeMillis());
-            kafka.send(KafkaTopics.SETUP_TRIGGERED, userId, mapper.writeValueAsString(event));
+            events.publish(KafkaTopics.SETUP_TRIGGERED, userId, mapper.writeValueAsString(event));
         } catch (Exception e) {
             log.warn("Failed to publish setup trigger for {} / {}: {}", setup.getName(), r.symbol(), e.getMessage());
         }

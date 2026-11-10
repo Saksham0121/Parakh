@@ -5,9 +5,9 @@ import com.parakh.common.analysis.Candles;
 import com.parakh.common.constants.KafkaTopics;
 import com.parakh.common.dto.event.PriceTickEvent;
 import com.parakh.engine.cache.TieredCache;
+import com.parakh.engine.events.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +28,7 @@ public class MarketService {
     private static final int MAX_PARALLEL_UPSTREAM = 8;
 
     private final YahooFinanceClient yahoo;
-    private final KafkaTemplate<String, String> kafka;
+    private final EventPublisher events;
     private final TieredCache cache;
     private final ObjectMapper mapper;
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
@@ -38,9 +38,9 @@ public class MarketService {
     private final Map<String, Long> subscriptions = new ConcurrentHashMap<>();
     private final Map<String, Double> lastPublished = new ConcurrentHashMap<>();
 
-    public MarketService(YahooFinanceClient yahoo, KafkaTemplate<String, String> kafka, TieredCache cache, ObjectMapper mapper) {
+    public MarketService(YahooFinanceClient yahoo, EventPublisher events, TieredCache cache, ObjectMapper mapper) {
         this.yahoo = yahoo;
-        this.kafka = kafka;
+        this.events = events;
         this.cache = cache;
         this.mapper = mapper;
     }
@@ -109,7 +109,7 @@ public class MarketService {
         Map<String, Object> out = new LinkedHashMap<>();
         futures.forEach((sym, f) -> {
             try {
-                Map<String, Object> q = f.get(12, TimeUnit.SECONDS);
+                Map<String, Object> q = f.get(30, TimeUnit.SECONDS);
                 if (q != null) out.put(sym, q);
             } catch (Exception ignored) {
                 // a slow symbol must not hold up the whole batch
@@ -196,7 +196,7 @@ public class MarketService {
         try {
             long ts = quote.get("t") instanceof Number t ? t.longValue() : Instant.now().getEpochSecond();
             double vol = quote.get("v") instanceof Number v ? v.doubleValue() : 0.0;
-            kafka.send(KafkaTopics.PRICE_TICKS, sym, mapper.writeValueAsString(new PriceTickEvent(sym, p, vol, ts)));
+            events.publish(KafkaTopics.PRICE_TICKS, sym, mapper.writeValueAsString(new PriceTickEvent(sym, p, vol, ts)));
         } catch (Exception e) {
             log.debug("Could not publish tick for {}: {}", sym, e.getMessage());
         }
@@ -206,7 +206,7 @@ public class MarketService {
     private <T> T throttled(Callable<T> call) {
         boolean acquired = false;
         try {
-            acquired = upstreamPermits.tryAcquire(15, TimeUnit.SECONDS);
+            acquired = upstreamPermits.tryAcquire(30, TimeUnit.SECONDS);
             if (!acquired) return null;
             return call.call();
         } catch (Exception e) {

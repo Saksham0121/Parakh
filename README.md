@@ -20,9 +20,10 @@ Example setup: *"Close breaks above its 20-day high on at least 1.5× average vo
 8. [API reference](#api-reference)
 9. [Project structure](#project-structure)
 10. [Getting started](#getting-started)
-11. [Configuration](#configuration)
-12. [Testing](#testing)
-13. [Known limitations](#known-limitations)
+11. [Deploying free on Render](#deploying-free-on-render)
+12. [Configuration](#configuration)
+13. [Testing](#testing)
+14. [Known limitations](#known-limitations)
 
 ---
 
@@ -328,8 +329,9 @@ Parakh/
 ├── backend/
 │   ├── parakh-common/   analysis/ (Candles, IndicatorMath, SetupEvaluator), domain/, dto/, constants/
 │   ├── parakh-core/     controller/, service/ (Setup, Watchlist, Auth, SetupTriggerListener), websocket/, db/migration/
-│   └── parakh-engine/   market/ (YahooFinanceClient, MarketService), cache/ (TieredCache), scanner/,
-│                        backtest/, indicator/, security/ (JwtAuthFilter), repository/
+│   ├── parakh-engine/   market/ (YahooFinanceClient, MarketService), cache/ (TieredCache), scanner/,
+│   │                    backtest/, indicator/, security/ (JwtAuthFilter), events/, repository/
+│   └── parakh-app/      all-in-one launcher: core + engine in one JVM, in-process events (for small hosts)
 ├── frontend/src/
 │   ├── pages/           Workspace (app shell), Login, Register
 │   ├── components/
@@ -340,7 +342,9 @@ Parakh/
 │   └── lib/             api (with SWR cache), catalog (indicators/metrics/templates), types, format
 ├── infra/               docker-compose.yml, nginx/, prometheus/, grafana/, vector/
 ├── loadtests/           k6 scenarios
-└── scripts/dev.sh       one-command local start
+├── scripts/dev.sh       one-command local start
+├── Dockerfile           lean image for parakh-app (Render / any single-container host)
+└── render.yaml          Render Blueprint: API, static frontend, Postgres, Key Value
 ```
 
 ---
@@ -377,6 +381,77 @@ Production-style: `npm run docker:build && npm run docker:up` serves everything 
 
 ---
 
+## Deploying free on Render
+
+The full stack (two services, Kafka, Redis, Socket.IO on its own port) doesn't fit Render's free tier: 512 MB RAM, 0.1 CPU, one public port, no Kafka. So the repo also ships a **single-container mode**:
+
+| Normal (Docker Compose) | Render free (`parakh-app`) |
+|---|---|
+| `parakh-core` and `parakh-engine` as two JVMs | One JVM running both (`backend/parakh-app`) |
+| Engine → core events over Kafka | Delivered in-process (`MESSAGING_MODE=inprocess`) |
+| Redis shared cache | Optional: used when `REDIS_URL` is set; otherwise in-memory only |
+| Socket.IO push on port 3009 | Off (`REALTIME_ENABLED=false`); the UI polls prices every 10 s and alerts every minute |
+| Frontend served by Nginx | Render static site (free, CDN, no instance hours); `/api/*` is rewritten to the API |
+
+### What the image does to fit in 512 MB
+- **Multi-stage build:** Maven builds only `parakh-app` and its modules. The runtime is the JRE on Alpine, and the app runs as a non-root user.
+- **Faster start-up:** the fat jar is **extracted**, which starts faster and uses less memory than a nested jar.
+- **JVM tuning:**
+  - `SerialGC` (smallest collector);
+  - C1-only JIT (`TieredStopAtLevel=1`), which needs less memory and CPU on 0.1 vCPU;
+  - heap capped at 60 % of the container;
+  - bounded metaspace and code cache;
+  - `ExitOnOutOfMemoryError`, so Render restarts the service instead of leaving it hung.
+- **App settings:**
+  - 5 database connections (free Postgres tiers allow few);
+  - in-memory cache capped at 400 entries;
+  - Kafka auto-configuration excluded;
+  - quieter logging;
+  - setup scans every 3 min and price polling every 20 s on the free plan.
+
+### Steps
+1. Push the repo to GitHub.
+2. In Render: **New → Blueprint**, pick the repo. `render.yaml` creates:
+   - `parakh-api`: a Docker web service, built from `./Dockerfile`, with health check `/actuator/health`;
+   - `parakh-web`: a static site built from `frontend/` with `VITE_REALTIME=false`;
+   - `parakh-db`: Postgres, passed to the API as `DATABASE_URL` (converted to JDBC automatically);
+   - `parakh-cache`: Key Value, passed as `REDIS_URL`;
+   - `JWT_SECRET`: generated for you.
+3. After the first deploy, check the API's URL. If it isn't `https://parakh-api.onrender.com`, update the `/api/*` rewrite destination in `render.yaml` (or in the static site's **Redirects/Rewrites** settings).
+4. Open the static site's URL and create an account.
+
+Flyway creates the schema on first start. The first boot on a free instance takes about 1–2 minutes.
+
+Measured locally with the same limits (`docker run -m 512m --cpus 0.1`):
+- **Start-up:** about 135 s to healthy.
+- **Memory:** about 270 MB steady, and 274 MB after scanning 48 stocks. That leaves roughly 240 MB of headroom, with no out-of-memory kills.
+- **Fundamentals:** 0.3–6 s cold. The 6 s case includes Yahoo's one-time cookie handshake.
+- **Candles:** 1–3 s cold, about 0.5 s cached.
+- **Scanning 48 stocks:** 8.7 s cold, 0.8 s warm.
+
+### Running it next to another free backend
+- **Instance hours:** free web services in a workspace share **750 instance-hours a month**. One service running non-stop uses about 744, so two always-on services won't fit. Free services **sleep after 15 minutes** without traffic and only use hours while awake, so Parakh and another backend can share the allowance if neither is kept awake 24/7. The static frontend doesn't count.
+- **Database and Key Value limits:** a workspace can have only **one free Postgres** and **one free Key Value**. If your other backend already uses them, either:
+  - point `DATABASE_URL` at a free external Postgres (Neon, Supabase), remembering to keep `?sslmode=require`; or
+  - reuse the existing database by creating a separate database or schema for Parakh;
+  - and delete the `parakh-cache` block. The API runs fine without Redis.
+- **Free Postgres expiry:** Render's free Postgres **expires after 30 days**. For anything long-lived, use Neon or Supabase.
+
+### While the API is asleep
+Setup monitoring only runs while the instance is awake. The first request after a sleep wakes it, which takes about a minute. Alerts that matter to you require the service to be awake, e.g. by a free uptime pinger hitting `/actuator/health`. That spends instance hours, so do it for one service at most.
+
+### Running the single-container image anywhere
+```bash
+docker build -t parakh .
+```
+```bash
+docker run -p 8080:8080 -m 512m -e DATABASE_URL=postgres://user:pass@host:5432/parakh -e JWT_SECRET=change-me parakh
+```
+
+On a bigger host, run the Compose stack instead, or set `MESSAGING_MODE=kafka`, `SPRING_AUTOCONFIGURE_EXCLUDE=` (empty) and `REALTIME_ENABLED=true` to turn Kafka and Socket.IO back on.
+
+---
+
 ## Configuration
 
 | Variable | Default | Used by |
@@ -389,6 +464,16 @@ Production-style: `npm run docker:build && npm run docker:up` serves everything 
 | `MARKET_POLL_INTERVAL_MS` | `5000` | engine |
 | `SCANNER_ENABLED` | `true` | engine |
 | `SCANNER_INTERVAL_MS` | `60000` | engine |
+| `DATABASE_URL` | none | parakh-app: `postgres://…` URL, converted to JDBC |
+| `REDIS_URL` | none | parakh-app: enables the Redis cache layer |
+| `PORT` | `8080` | parakh-app HTTP port (set by Render) |
+| `MESSAGING_MODE` | `inprocess` (parakh-app) / `kafka` (services) | engine → core events |
+| `REALTIME_ENABLED` | `false` (parakh-app) / `true` (core) | Socket.IO server |
+| `REDIS_ENABLED` | `false` (parakh-app) / `true` (services) | Redis cache layer |
+| `CACHE_L1_MAX_ENTRIES` | `400` (parakh-app) / `5000` | in-memory cache size |
+| `DB_POOL_SIZE` | `5` | parakh-app connection pool |
+| `JAVA_OPTS` | tuned for 512 MB | JVM flags in the Docker image |
+| `VITE_REALTIME` | unset (on) | frontend build: `false` disables the socket and polls instead |
 
 ---
 

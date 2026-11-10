@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "parakh.realtime.enabled", havingValue = "true", matchIfMissing = true)
 @Component
 public class WebSocketKafkaBridge {
 
@@ -21,6 +22,11 @@ public class WebSocketKafkaBridge {
     public WebSocketKafkaBridge(SocketIOEventHandler eventHandler, ObjectMapper objectMapper) {
         this.eventHandler = eventHandler;
         this.objectMapper = objectMapper;
+    }
+
+    @org.springframework.context.event.EventListener(condition = "#msg.topic() == 'price-ticks'")
+    public void onInProcessTick(com.parakh.common.messaging.BusMessage msg) {
+        onPriceTick(msg.payload());
     }
 
     @KafkaListener(topics = KafkaTopics.PRICE_TICKS, groupId = "ws-core-price-group")

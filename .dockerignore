@@ -30,3 +30,9 @@ archive/
 
 # Service-local node_modules
 frontend/node_modules
+
+# Not needed in backend images
+frontend/
+infra/
+loadtests/
+node_modules/
